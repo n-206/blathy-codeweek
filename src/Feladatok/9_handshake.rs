@@ -1,6 +1,6 @@
 use aes_gcm::{
-    Aes256Gcm, Nonce, Tag,
-    aead::{AeadInPlace, KeyInit},
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -97,18 +97,19 @@ pub struct HandshakeKeys {
 pub fn encrypt_answer(key: &[u8; 32], answer: &str) -> Result<EncryptedSolution> {
     let plaintext = serde_json::to_vec(&serde_json::json!({ "answer": answer }))
         .context("Could not serialize the answer")?;
-    let mut nonce = [0u8; 12];
-    getrandom::fill(&mut nonce)
+    let nonce = <[u8; 12]>::try_generate()
         .map_err(|error| anyhow::anyhow!("Could not generate a random AES-GCM nonce: {error}"))?;
-    let mut ciphertext = plaintext;
+    let nonce = Nonce::from(nonce);
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| anyhow::anyhow!("AES-256-GCM key must be exactly 32 bytes"))?;
-    let tag = cipher
-        .encrypt_in_place_detached(Nonce::from_slice(&nonce), b"", &mut ciphertext)
+    let encrypted = cipher
+        .encrypt(&nonce, plaintext.as_ref())
         .map_err(|_| anyhow::anyhow!("Could not encrypt the solution"))?;
 
+    let (ciphertext, tag) = encrypted.split_at(encrypted.len().saturating_sub(16));
+
     Ok(EncryptedSolution {
-        nonce: STANDARD.encode(nonce),
+        nonce: STANDARD.encode(nonce.as_slice()),
         ciphertext: STANDARD.encode(ciphertext),
         tag: STANDARD.encode(tag),
     })
@@ -125,27 +126,23 @@ pub fn decrypt_message(key: &[u8; 32], message: &InboxMessage) -> Result<Vec<u8>
         .decode(&message.tag)
         .context("Message tag is not valid base64")?;
 
-    let nonce: &[u8; 12] = nonce
+    let nonce: [u8; 12] = nonce
         .as_slice()
         .try_into()
         .context("AES-GCM nonce must be exactly 12 bytes")?;
-    let tag: &[u8; 16] = tag
+    let tag: [u8; 16] = tag
         .as_slice()
         .try_into()
         .context("AES-GCM tag must be exactly 16 bytes")?;
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| anyhow::anyhow!("AES-256-GCM key must be exactly 32 bytes"))?;
 
-    cipher
-        .decrypt_in_place_detached(
-            Nonce::from_slice(nonce),
-            b"",
-            &mut ciphertext,
-            Tag::from_slice(tag),
-        )
+    ciphertext.extend_from_slice(&tag);
+    let plaintext = cipher
+        .decrypt(&Nonce::from(nonce), ciphertext.as_ref())
         .map_err(|_| anyhow::anyhow!("Message {} failed AES-GCM authentication", message.id))?;
 
-    Ok(ciphertext)
+    Ok(plaintext)
 }
 
 fn derive_keys(source: &Source) -> Result<HandshakeKeys> {
