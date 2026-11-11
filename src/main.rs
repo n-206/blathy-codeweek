@@ -1,6 +1,8 @@
 use anyhow::Result;
 use reqwest::Client;
 
+#[path = "Arena/mod.rs"]
+pub mod arena;
 #[path = "Feladatok/mod.rs"]
 pub mod feladatok;
 #[path = "Kuldetesek/mod.rs"]
@@ -10,6 +12,8 @@ pub mod kuldetesek;
 async fn main() -> Result<()> {
     let CLIENT = Client::new();
 
+    //? A1
+    // arena::a1::solve(&CLIENT).await?;
     //? 1
     // feladatok::fejlec::solve(&CLIENT).await?;
     //? 2
@@ -24,6 +28,12 @@ async fn main() -> Result<()> {
     //* Mellék küldetések:
     //? S2
     // kuldetesek::s2::solve(&CLIENT).await?;
+
+    //* Aréna:
+    //? A1
+    arena::a1::solve(&CLIENT).await?;
+    //? A2
+    // arena::a2::solve(&CLIENT).await?;
 
     Ok(())
 }
