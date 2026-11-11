@@ -2,6 +2,7 @@
 name = "codeweek"
 version = "0.1.0"
 edition = "2024"
+default-run = "codeweek"
 
 [dependencies]
 
@@ -12,16 +13,22 @@ p256 = { version = "0.14.0", features = ["ecdh", "ecdsa", "pem"] }
 sha2 = "0.11.1"
 
 # HTTP
-reqwest = { version = "0.13.5", features = ["json"] }
+axum = "0.8"
+reqwest = { version = "0.13.5", features = ["json", "form"] }
 
 # Serialization and encoding
 base64 = "0.23.1"
+hex = "0.4"
+hmac = "0.13"
+sha1 = "0.11"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+chrono = "0.4"
+dotenvy = "0.15"
 
 # Compression
 flate2 = "1"
 
 # Errors and async runtime
 anyhow = "1.0.104"
-tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "net"] }

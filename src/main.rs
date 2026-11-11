@@ -18,6 +18,8 @@ async fn main() -> Result<()> {
     // feladatok::fejlec::solve(&CLIENT).await?;
     //? 2
     // feladatok::archivum::solve(&CLIENT).await?;
+    //? 3
+    // feladatok::belepes::solve(&CLIENT).await?;
     //? 7
     // feladatok::ballisztika::solve(&CLIENT).await?;
     //? 8
@@ -28,10 +30,12 @@ async fn main() -> Result<()> {
     //* Mellék küldetések:
     //? S2
     // kuldetesek::s2::solve(&CLIENT).await?;
+    //? S3
+    //kuldetesek::s3::solve(&CLIENT).await?;
 
     //* Aréna:
     //? A1
-    arena::a1::solve(&CLIENT).await?;
+    // arena::a1::solve(&CLIENT).await?;
     //? A2
     // arena::a2::solve(&CLIENT).await?;
 
