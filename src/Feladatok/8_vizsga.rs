@@ -185,6 +185,11 @@ pub async fn solve(client: &Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 impl Search<'_> {
     fn visit(&mut self, assigned_count: usize, score: usize) {
         if self.stopped {

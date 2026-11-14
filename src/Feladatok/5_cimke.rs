@@ -148,6 +148,11 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 fn validate_font(font: &Font) -> Result<()> {
     if font.width != 8 || font.height != 8 || font.bit_order != "msb-first" {
         bail!(

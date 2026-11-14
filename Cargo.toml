@@ -36,3 +36,4 @@ flate2 = "1"
 # Errors and async runtime
 anyhow = "1.0.104"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "time", "net", "sync"] }
+futures = "0.3.34"

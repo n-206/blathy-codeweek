@@ -123,6 +123,11 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 fn world_targets(scene: &Scene) -> Result<Vec<Target>> {
     let mut targets = Vec::new();
     for platform in &scene.platforms {

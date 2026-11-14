@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use reqwest::Url;
+use reqwest::{Url, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -65,7 +65,7 @@ struct Solution {
     rates_version: String,
 }
 
-pub async fn solve(client: &reqwest::Client) -> Result<()> {
+pub async fn solve(client: &Client) -> Result<()> {
     let source = get_source(client).await?;
     let (shop, warehouse, catalog) = tokio::try_join!(
         get_shop(client, &source.shop),
@@ -156,7 +156,12 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
-async fn get_source(client: &reqwest::Client) -> Result<Source> {
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
+async fn get_source(client: &Client) -> Result<Source> {
     let url = Url::parse(&crate::api_url("expedition/source")?)?;
     let value = get_json(client, &url).await?;
     let sources = value
@@ -186,7 +191,7 @@ async fn get_source(client: &reqwest::Client) -> Result<Source> {
     })
 }
 
-async fn get_json(client: &reqwest::Client, url: &Url) -> Result<Value> {
+async fn get_json(client: &Client, url: &Url) -> Result<Value> {
     let response = client
         .get(url.clone())
         .send()
@@ -203,7 +208,7 @@ async fn get_json(client: &reqwest::Client, url: &Url) -> Result<Value> {
     serde_json::from_str(&body).with_context(|| format!("GET {url} returned invalid JSON"))
 }
 
-async fn get_shop(client: &reqwest::Client, first_url: &Url) -> Result<Vec<ShopItem>> {
+async fn get_shop(client: &Client, first_url: &Url) -> Result<Vec<ShopItem>> {
     let mut next = Some(first_url.clone());
     let mut visited = HashSet::new();
     let mut products = Vec::new();
@@ -242,7 +247,7 @@ async fn get_shop(client: &reqwest::Client, first_url: &Url) -> Result<Vec<ShopI
     Ok(products)
 }
 
-async fn get_warehouse(client: &reqwest::Client, url: &Url) -> Result<HashMap<u64, WarehouseItem>> {
+async fn get_warehouse(client: &Client, url: &Url) -> Result<HashMap<u64, WarehouseItem>> {
     let response = client
         .get(url.clone())
         .send()
@@ -459,7 +464,7 @@ impl XmlItems {
     }
 }
 
-async fn get_catalog(client: &reqwest::Client, url: &Url) -> Result<Catalog> {
+async fn get_catalog(client: &Client, url: &Url) -> Result<Catalog> {
     let response = client
         .get(url.clone())
         .send()
@@ -900,7 +905,7 @@ fn xml_truthy(value: Option<&str>) -> bool {
     value.is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes"))
 }
 
-async fn get_rates(client: &reqwest::Client, url: &Url) -> Result<Rates> {
+async fn get_rates(client: &Client, url: &Url) -> Result<Rates> {
     let response = client
         .get(url.clone())
         .send()

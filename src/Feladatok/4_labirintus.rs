@@ -118,6 +118,11 @@ pub async fn solve(client: &Client) -> Result<()> {
     submit_solution(client, &solution).await
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room>> {
     let mut rooms = HashMap::new();
     let mut pending = VecDeque::from([entrance.to_owned()]);

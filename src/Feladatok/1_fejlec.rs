@@ -67,6 +67,11 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 fn required_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str> {
     headers
         .get(name)

@@ -8,14 +8,26 @@ use sha2::{Digest, Sha256, Sha512};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn solve(_client: &Client) -> Result<()> {
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.status() == StatusCode::SEE_OTHER {
-                attempt.stop()
-            } else {
-                attempt.follow()
-            }
-        }))
+    solve_with_run_key(None).await
+}
+
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    solve_with_run_key(Some(run_key)).await
+}
+
+async fn solve_with_run_key(run_key: Option<&str>) -> Result<()> {
+    let builder = Client::builder().redirect(reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.status() == StatusCode::SEE_OTHER {
+            attempt.stop()
+        } else {
+            attempt.follow()
+        }
+    }));
+    let builder = match run_key {
+        Some(run_key) => builder.default_headers(super::run_key_headers(run_key)?),
+        None => builder,
+    };
+    let client = builder
         .build()
         .context("A kézi 303-kezelésű HTTP-kliens létrehozása sikertelen")?;
 

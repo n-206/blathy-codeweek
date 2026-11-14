@@ -1,3 +1,24 @@
+use anyhow::{Context, Result};
+use reqwest::{
+    Client,
+    header::{HeaderMap, HeaderName, HeaderValue},
+};
+
+pub(crate) fn run_key_headers(run_key: &str) -> Result<HeaderMap> {
+    let value =
+        HeaderValue::from_str(run_key).context("Run key is not a valid HTTP header value")?;
+    let mut headers = HeaderMap::new();
+    headers.insert(HeaderName::from_static("x-run-key"), value);
+    Ok(headers)
+}
+
+pub(crate) fn client_with_run_key(run_key: &str) -> Result<Client> {
+    Client::builder()
+        .default_headers(run_key_headers(run_key)?)
+        .build()
+        .context("Could not build HTTP client with X-Run-Key")
+}
+
 #[path = "2_archivum.rs"]
 pub mod archivum;
 #[path = "7_ballisztika.rs"]

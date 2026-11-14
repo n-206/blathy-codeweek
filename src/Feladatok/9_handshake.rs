@@ -12,7 +12,7 @@ use p256::{
     elliptic_curve::Generate,
     pkcs8::{DecodePublicKey, EncodePublicKey, LineEnding},
 };
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -240,7 +240,7 @@ fn derive_password(source: &Source, key: &[u8; 32], messages: &[InboxMessage]) -
     Ok(transformed.join(&separator))
 }
 
-pub async fn solve(client: &reqwest::Client) -> Result<()> {
+pub async fn solve(client: &Client) -> Result<()> {
     let source = fetch_source(client).await?;
     let keys = derive_keys(&source)?;
     send_hello(client, &keys.hello).await?;
@@ -265,6 +265,11 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     Ok(())
 }
 
+pub async fn zero_solve(run_key: &str) -> Result<()> {
+    let keyed_client = super::client_with_run_key(run_key)?;
+    solve(&keyed_client).await
+}
+
 fn hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
@@ -275,7 +280,7 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
-async fn fetch_source(client: &reqwest::Client) -> Result<Source> {
+async fn fetch_source(client: &Client) -> Result<Source> {
     let response = client
         .get(crate::api_url("secret-handshake/source")?)
         .send()
@@ -303,7 +308,7 @@ async fn fetch_source(client: &reqwest::Client) -> Result<Source> {
     })
 }
 
-async fn fetch_inbox(client: &reqwest::Client) -> Result<InboxData> {
+async fn fetch_inbox(client: &Client) -> Result<InboxData> {
     let response = client
         .get(crate::api_url("secret-handshake/inbox")?)
         .send()
@@ -331,7 +336,7 @@ async fn fetch_inbox(client: &reqwest::Client) -> Result<InboxData> {
     })
 }
 
-async fn send_hello(client: &reqwest::Client, hello: &Hello) -> Result<Value> {
+async fn send_hello(client: &Client, hello: &Hello) -> Result<Value> {
     let response = client
         .post(crate::api_url("secret-handshake/hello")?)
         .json(hello)
@@ -355,7 +360,7 @@ async fn send_hello(client: &reqwest::Client, hello: &Hello) -> Result<Value> {
 }
 
 pub async fn send_solution(
-    client: &reqwest::Client,
+    client: &Client,
     solution: &EncryptedSolution,
 ) -> Result<Value> {
     let response = client
@@ -378,7 +383,7 @@ pub async fn send_solution(
     serde_json::from_str(&body).context("Handshake solution returned invalid JSON")
 }
 
-async fn send_selftest(client: &reqwest::Client, selftest: &SelftestRequest) -> Result<Value> {
+async fn send_selftest(client: &Client, selftest: &SelftestRequest) -> Result<Value> {
     let response = client
         .post(crate::api_url("secret-handshake/selftest")?)
         .json(selftest)
