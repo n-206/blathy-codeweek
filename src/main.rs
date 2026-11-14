@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .set(api_base)
         .map_err(|_| anyhow::anyhow!("API_BASE has already been initialized"))?;
 
-    let client = Client::new();
+    let CLIENT = Client::new();
 
     println!("Client has been set up");
 
@@ -61,11 +61,13 @@ async fn main() -> Result<()> {
     //? 7
     // feladatok::ballisztika::solve(&CLIENT).await?;
     //? 8
-    feladatok::vizsga::solve(&client).await?;
+    // feladatok::vizsga::solve(&CLIENT).await?;
     // ? 9
     // feladatok::handshake::solve(&CLIENT).await?;
 
     //* Mellék küldetések:
+    //? S1
+    kuldetesek::s1::solve(&CLIENT).await?;
     //? S2
     // kuldetesek::s2::solve(&CLIENT).await?;
     //? S3
