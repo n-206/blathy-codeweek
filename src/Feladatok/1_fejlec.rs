@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashSet;
 
 #[derive(Debug, Deserialize)]
 struct Source {
@@ -94,8 +95,17 @@ fn evaluate(numbers: &[i128], operations: &str) -> Result<i128> {
                     *value = reverse_digits(*value)?;
                 }
             }
+            ("digit-sum", None) => {
+                for value in &mut values {
+                    *value = digit_sum(*value);
+                }
+            }
             ("filter-odd", None) => values.retain(|value| value % 2 != 0),
             ("filter-even", None) => values.retain(|value| value % 2 == 0),
+            ("unique", None) => {
+                let mut seen = HashSet::new();
+                values.retain(|value| seen.insert(*value));
+            }
             ("take", Some(count)) => values.truncate(parse_argument(count, operation)?),
             ("drop", Some(count)) => {
                 let count = parse_argument(count, operation)?.min(values.len());
@@ -188,4 +198,14 @@ fn reverse_digits(value: i128) -> Result<i128> {
         .context("Reversed number is outside the supported integer range")?
         .checked_mul(sign)
         .context("Integer overflow in reverse-digits operation")
+}
+
+fn digit_sum(value: i128) -> i128 {
+    let mut digits = value.unsigned_abs();
+    let mut sum = 0;
+    while digits > 0 {
+        sum += digits % 10;
+        digits /= 10;
+    }
+    sum as i128
 }
