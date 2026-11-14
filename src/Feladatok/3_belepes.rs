@@ -7,8 +7,6 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const API_BASE: &str =
-    "http://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/broken-login";
 pub async fn solve(_client: &Client) -> Result<()> {
     let client = Client::builder()
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
@@ -22,7 +20,7 @@ pub async fn solve(_client: &Client) -> Result<()> {
         .context("A kézi 303-kezelésű HTTP-kliens létrehozása sikertelen")?;
 
     let response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("broken-login/source")?)
         .send()
         .await
         .context("A /source kérés sikertelen")?;

@@ -2,17 +2,20 @@ use std::path::Path;
 
 use anyhow::Context;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/parking-garage";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if Path::new(".env").exists() {
         dotenvy::from_path(".env").context("Failed to load .env")?;
     }
 
+    let api_base =
+        std::env::var("API_BASE").context("API_BASE must be set in .env or the environment")?;
+    if api_base.trim().is_empty() {
+        anyhow::bail!("API_BASE must not be empty");
+    }
+    let api_base = format!("{}/parking-garage", api_base.trim_end_matches('/'));
     let response = reqwest::Client::new()
-        .post(format!("{API_BASE}/runs"))
+        .post(format!("{api_base}/runs"))
         .send()
         .await
         .context("Failed to start parking garage run")?

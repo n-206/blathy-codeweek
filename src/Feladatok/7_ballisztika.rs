@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/ballistics";
 const SCAN_STEP: f64 = 0.001;
 
 type Vec3 = [f64; 3];
@@ -356,7 +354,7 @@ async fn get_data<T: for<'de> Deserialize<'de>>(
     endpoint: &str,
 ) -> Result<T> {
     let response = client
-        .get(format!("{API_BASE}{endpoint}"))
+        .get(crate::api_url(&format!("ballistics{endpoint}"))?)
         .send()
         .await
         .with_context(|| format!("GET {endpoint} request failed"))?;
@@ -384,7 +382,7 @@ async fn get_data<T: for<'de> Deserialize<'de>>(
 
 async fn send_solution(client: &reqwest::Client, solution: &Solution) -> Result<Value> {
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("ballistics/solution")?)
         .json(solution)
         .send()
         .await

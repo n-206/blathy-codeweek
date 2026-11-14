@@ -3,9 +3,6 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use serde::Deserialize;
 use serde_json::json;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/header-hunter";
-
 #[derive(Debug, Deserialize)]
 struct Source {
     numbers: Vec<i128>,
@@ -13,7 +10,7 @@ struct Source {
 
 pub async fn solve(client: &reqwest::Client) -> Result<()> {
     let response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("header-hunter/source")?)
         .send()
         .await
         .context("GET /source request failed")?;
@@ -49,7 +46,7 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     };
 
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("header-hunter/solution")?)
         .header("X-Request-Id", request_id)
         .header(CONTENT_TYPE, content_type)
         .body(answer_body)

@@ -3,8 +3,6 @@ use reqwest::Client;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/code-breaker";
 const RANKED_GAMES: usize = 20;
 const MAX_GUESSES: usize = 10;
 
@@ -56,7 +54,7 @@ pub async fn solve(client: &Client) -> Result<()> {
 async fn play_ranked_game(client: &Client) -> Result<usize> {
     let game: NewGame = post_data(
         client,
-        &format!("{API_BASE}/games"),
+        &crate::api_url("code-breaker/games")?,
         &serde_json::json!({
             "mode": "ranked"
         }),
@@ -69,7 +67,7 @@ async fn play_ranked_game(client: &Client) -> Result<usize> {
         let guess = choose_guess(&possible);
         let result: GuessResult = post_data(
             client,
-            &format!("{API_BASE}/games/{}/guess", game.uuid),
+            &crate::api_url(&format!("code-breaker/games/{}/guess", game.uuid))?,
             &GuessRequest { guess },
         )
         .await
@@ -121,7 +119,7 @@ async fn get_finished_secret(client: &Client, uuid: &str) -> Result<Option<Code>
     }
 
     let response = client
-        .get(format!("{API_BASE}/games/{uuid}"))
+        .get(crate::api_url(&format!("code-breaker/games/{uuid}"))?)
         .send()
         .await
         .context("Could not fetch finished game status")?;

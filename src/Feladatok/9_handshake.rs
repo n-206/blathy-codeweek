@@ -17,9 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/secret-handshake";
-
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
     status: Value,
@@ -280,7 +277,7 @@ fn hex(bytes: &[u8]) -> String {
 
 async fn fetch_source(client: &reqwest::Client) -> Result<Source> {
     let response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("secret-handshake/source")?)
         .send()
         .await
         .context("Could not request the handshake source")?;
@@ -308,7 +305,7 @@ async fn fetch_source(client: &reqwest::Client) -> Result<Source> {
 
 async fn fetch_inbox(client: &reqwest::Client) -> Result<InboxData> {
     let response = client
-        .get(format!("{API_BASE}/inbox"))
+        .get(crate::api_url("secret-handshake/inbox")?)
         .send()
         .await
         .context("Could not request the handshake inbox")?;
@@ -336,7 +333,7 @@ async fn fetch_inbox(client: &reqwest::Client) -> Result<InboxData> {
 
 async fn send_hello(client: &reqwest::Client, hello: &Hello) -> Result<Value> {
     let response = client
-        .post(format!("{API_BASE}/hello"))
+        .post(crate::api_url("secret-handshake/hello")?)
         .json(hello)
         .send()
         .await
@@ -362,7 +359,7 @@ pub async fn send_solution(
     solution: &EncryptedSolution,
 ) -> Result<Value> {
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("secret-handshake/solution")?)
         .json(solution)
         .send()
         .await
@@ -383,7 +380,7 @@ pub async fn send_solution(
 
 async fn send_selftest(client: &reqwest::Client, selftest: &SelftestRequest) -> Result<Value> {
     let response = client
-        .post(format!("{API_BASE}/selftest"))
+        .post(crate::api_url("secret-handshake/selftest")?)
         .json(selftest)
         .send()
         .await

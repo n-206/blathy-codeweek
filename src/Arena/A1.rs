@@ -4,8 +4,6 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/lift-controller";
 #[derive(Debug, serde::Deserialize)]
 struct ApiResponse<T> {
     status: Value,
@@ -99,7 +97,7 @@ async fn play_scenario(client: &Client, scenario: &str, mode: &str) -> Result<()
 
     let game = post_data::<GameState, _>(
         client,
-        &format!("{API_BASE}/games"),
+        &crate::api_url("lift-controller/games")?,
         &serde_json::json!({
             "mode": mode,
             "scenario": scenario
@@ -118,7 +116,7 @@ async fn play_game(client: &Client, mut game: GameState) -> Result<()> {
         let commands = choose_commands(&game, &mut last_directions);
         game = post_data(
             client,
-            &format!("{API_BASE}/games/{}/tick", game.uuid),
+            &crate::api_url(&format!("lift-controller/games/{}/tick", game.uuid))?,
             &TickRequest {
                 tick: game.tick,
                 commands,

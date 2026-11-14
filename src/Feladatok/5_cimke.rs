@@ -4,8 +4,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fmt;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/label-printer";
 const MAX_JOB_POLLS: usize = 240;
 const MAX_BUSY_POLLS: usize = 1000;
 
@@ -98,7 +96,7 @@ impl std::error::Error for SerialApiError {}
 
 pub async fn solve(client: &reqwest::Client) -> Result<()> {
     let source_response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("label-printer/source")?)
         .send()
         .await
         .context("GET /source request failed")?;
@@ -368,7 +366,7 @@ async fn send_packets(client: &reqwest::Client, packets: &[Vec<u8>]) -> Result<S
         .collect::<Vec<_>>()
         .join(" ");
     let response = client
-        .post(format!("{API_BASE}/serial"))
+        .post(crate::api_url("label-printer/serial")?)
         .json(&json!({ "hex": hex }))
         .send()
         .await

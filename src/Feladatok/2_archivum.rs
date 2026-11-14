@@ -5,8 +5,6 @@ use serde_json::{Number, Value, json};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/archive";
 const MAX_RATE_LIMIT_RETRIES: usize = 20;
 
 #[derive(Debug, Deserialize)]
@@ -94,7 +92,7 @@ impl RateLimiter {
 }
 
 pub async fn solve(client: &Client) -> Result<()> {
-    let source_value = get_json(client, &format!("{API_BASE}/source"), None).await?;
+    let source_value = get_json(client, &crate::api_url("archive/source")?, None).await?;
     let source: Source = serde_json::from_value(payload(source_value))
         .context("GET /source returned an invalid archive task")?;
     let snapshot = parse_timestamp(&source.snapshot_at)
@@ -122,7 +120,7 @@ pub async fn solve(client: &Client) -> Result<()> {
     )?;
 
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("archive/solution")?)
         .json(&json!({ "result": result }))
         .send()
         .await
@@ -150,7 +148,8 @@ async fn fetch_snapshot(
         return Ok(Vec::new());
     }
 
-    let base = Url::parse(API_BASE).context("Archive API base URL is invalid")?;
+    let base =
+        Url::parse(&crate::api_url("archive")?).context("Archive API base URL is invalid")?;
     let records_path = format!("{}/records", base.path());
     let mut next = Some(source.first_page.clone());
     let mut records = HashMap::new();

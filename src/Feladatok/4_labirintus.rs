@@ -5,9 +5,6 @@ use serde_json::{Value, json};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/labyrinth";
-
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
     status: Value,
@@ -60,7 +57,7 @@ pub struct Solution {
 
 async fn get_data<T: for<'de> Deserialize<'de>>(client: &Client, endpoint: &str) -> Result<T> {
     let response = client
-        .get(format!("{API_BASE}{endpoint}"))
+        .get(crate::api_url(&format!("labyrinth{endpoint}"))?)
         .send()
         .await
         .with_context(|| format!("GET {endpoint} request failed"))?;
@@ -147,7 +144,7 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
                 if item.picked_up != Some(true) {
                     send_action(
                         client
-                            .post(format!("{API_BASE}/room/{room_id}/pickup"))
+                            .post(crate::api_url(&format!("labyrinth/room/{room_id}/pickup"))?)
                             .json(&json!({ "item": item.id })),
                         &format!("POST /room/{room_id}/pickup"),
                     )
@@ -186,7 +183,7 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
 
         send_action(
             client
-                .patch(format!("{API_BASE}/door/{door_id}"))
+                .patch(crate::api_url(&format!("labyrinth/door/{door_id}"))?)
                 .json(&json!({ "key": color })),
             &format!("PATCH /door/{door_id}"),
         )
@@ -343,7 +340,7 @@ fn has_key(keys: &[u64], key_index: usize) -> bool {
 
 async fn submit_solution(client: &Client, solution: &Solution) -> Result<()> {
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("labyrinth/solution")?)
         .json(solution)
         .send()
         .await

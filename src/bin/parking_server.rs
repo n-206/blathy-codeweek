@@ -7,9 +7,6 @@ use anyhow::{Context, bail};
 use serde::Deserialize;
 use serde_json::Value;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/parking-garage";
-
 #[derive(Deserialize)]
 struct Source {
     secret: String,
@@ -29,6 +26,12 @@ async fn main() -> anyhow::Result<()> {
 
     let endpoint_url =
         env::var("PARKING_URL").context("PARKING_URL must be set in .env or the environment")?;
+    let api_base =
+        env::var("API_BASE").context("API_BASE must be set in .env or the environment")?;
+    if api_base.trim().is_empty() {
+        bail!("API_BASE must not be empty");
+    }
+    let api_base = format!("{}/parking-garage", api_base.trim_end_matches('/'));
     let parsed_url = reqwest::Url::parse(&endpoint_url).context("PARKING_URL is invalid")?;
     if parsed_url.scheme() != "https" {
         bail!("PARKING_URL must use https");
@@ -41,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
 
     let client = reqwest::Client::new();
     let source_response = client
-        .get(format!("{API_BASE}/source"))
+        .get(format!("{api_base}/source"))
         .send()
         .await
         .context("Failed to request garage source")?
@@ -60,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
 
     let registration = client
-        .put(format!("{API_BASE}/endpoint"))
+        .put(format!("{api_base}/endpoint"))
         .json(&serde_json::json!({ "url": endpoint_url }))
         .send()
         .await

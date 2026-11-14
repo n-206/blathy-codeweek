@@ -6,9 +6,6 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::io::Read;
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/onion";
-
 #[derive(Debug, Deserialize)]
 struct Source {
     payload: String,
@@ -17,7 +14,7 @@ struct Source {
 
 pub async fn solve(client: &reqwest::Client) -> Result<()> {
     let response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("onion/source")?)
         .send()
         .await
         .context("GET /onion/source request failed")?;
@@ -50,7 +47,7 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
     .context("Could not find a valid Hungarian sentence in the onion")?;
 
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("onion/solution")?)
         .json(&json!({ "answer": answer }))
         .send()
         .await

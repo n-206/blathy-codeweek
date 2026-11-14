@@ -4,9 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/expedition";
-
 #[derive(Debug)]
 struct Source {
     budget: u64,
@@ -142,7 +139,7 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
         rates_version: rates.version,
     };
     let response = client
-        .post(format!("{API_BASE}/solution"))
+        .post(crate::api_url("expedition/solution")?)
         .json(&solution)
         .send()
         .await
@@ -160,7 +157,7 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
 }
 
 async fn get_source(client: &reqwest::Client) -> Result<Source> {
-    let url = Url::parse(&format!("{API_BASE}/source"))?;
+    let url = Url::parse(&crate::api_url("expedition/source")?)?;
     let value = get_json(client, &url).await?;
     let sources = value
         .get("sources")

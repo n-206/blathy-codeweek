@@ -6,9 +6,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-const API_BASE: &str =
-    "https://codeweek.blathy.info/api/task/HkcFuUnk8AEOjH0qSvZdTfhgVZWgHca5/blathy-mine";
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Challenge {
@@ -28,7 +25,7 @@ struct SolutionResponse {
 
 pub async fn solve(client: &reqwest::Client) -> Result<()> {
     let response = client
-        .get(format!("{API_BASE}/source"))
+        .get(crate::api_url("blathy-mine/source")?)
         .send()
         .await
         .context("GET /blathy-mine/source request failed")?;
@@ -68,7 +65,7 @@ pub async fn solve(client: &reqwest::Client) -> Result<()> {
 
         println!("Level {} nonce: {nonce}", challenge.level);
         let response = client
-            .post(format!("{API_BASE}/solution"))
+            .post(crate::api_url("blathy-mine/solution")?)
             .json(&json!({ "nonce": nonce }))
             .send()
             .await
