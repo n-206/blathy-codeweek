@@ -8,7 +8,8 @@ pub mod belepes;
 pub mod labirintus;
 #[path = "5_cimke.rs"]
 pub mod cimke;
-
+#[path = "6_expedicio.rs"]
+pub mod expedicio;
 #[path = "7_ballisztika.rs"]
 pub mod ballisztika;
 

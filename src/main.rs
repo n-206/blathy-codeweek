@@ -20,6 +20,8 @@ async fn main() -> Result<()> {
     // feladatok::archivum::solve(&CLIENT).await?;
     //? 3
     // feladatok::belepes::solve(&CLIENT).await?;
+    //? 6
+    feladatok::expedicio::solve(&CLIENT).await?;
     //? 7
     // feladatok::ballisztika::solve(&CLIENT).await?;
     //? 8
