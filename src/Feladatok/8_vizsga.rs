@@ -98,6 +98,7 @@ struct Search<'a> {
     nodes: usize,
     started: Instant,
     stopped: bool,
+    limit_reached: bool,
 }
 
 pub async fn solve(client: &Client) -> Result<()> {
@@ -127,10 +128,24 @@ pub async fn solve(client: &Client) -> Result<()> {
         nodes: 0,
         started: Instant::now(),
         stopped: false,
+        limit_reached: false,
     };
     search.visit(0, 0);
 
-    let schedule = search.best.context("No valid exam schedule was found")?;
+    let schedule = match search.best {
+        Some(schedule) => schedule,
+        None if search.limit_reached => bail!(
+            "Exam schedule search reached its limit after {} nodes and {:?} without finding a schedule (maximum score: {})",
+            search.nodes,
+            search.started.elapsed(),
+            search.max_score
+        ),
+        None => bail!(
+            "No valid exam schedule met the maximum score of {} after searching {} nodes",
+            search.max_score,
+            search.nodes
+        ),
+    };
     if search.best_score > source.goal.max_score {
         bail!(
             "Best schedule scores {}, above the allowed maximum of {} (searched {} nodes)",
@@ -198,6 +213,7 @@ impl Search<'_> {
         self.nodes += 1;
         if self.nodes >= SEARCH_NODE_LIMIT || self.started.elapsed() >= SEARCH_TIME_LIMIT {
             self.stopped = true;
+            self.limit_reached = true;
             return;
         }
         if score > self.max_score || score >= self.best_score {

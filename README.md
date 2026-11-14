@@ -8,9 +8,9 @@ Copyright (C) 2026 n206 <notnandor@posteo.nl>
 I chose Rust because it is the language I know best, and used widely adopted
 crates from the Rust ecosystem. The project is an asynchronous client for
 Codeweek challenge APIs. It contains ten task modules, three side missions,
-two arena challenges, and a default **Zero to Hero** run that submits the task
+two arena challenges, and a **Zero to Hero** run that submits the task
 solutions concurrently. It also includes a local parking-garage challenge
-server.
+server. Do note that I might not have thought about everything, it might break while running.
 
 ## Requirements
 
@@ -33,15 +33,15 @@ Alternatively, create a `.env` file in the project directory containing:
 API_BASE=https://your-challenge-api.example
 ```
 
-`cargo run` starts the Zero to Hero run by default. Other task, side-mission,
-and arena entry points are available in `src/main.rs`; select the one you want
-there before running.
+`cargo run` opens an interactive menu where you can choose Zero to Hero, an
+individual task, a side mission, or an arena challenge.
 
 ### Parking-garage server
 
-The optional parking server fetches its challenge data from the API and
-registers its public endpoint. Set `API_BASE` and `PARKING_URL` (an externally
-reachable HTTPS URL for the server), then run:
+The parking-garage task is available separately for testing and requires the
+parking server to be running and its public endpoint registered first. Set
+`API_BASE` and `PARKING_URL` (an externally reachable HTTPS URL for the server),
+then start it in a separate terminal:
 
 ```sh
 cargo run --bin parking_server
@@ -49,6 +49,7 @@ cargo run --bin parking_server
 
 The server listens on port `3000` by default. Set `PORT` to use a different
 port. The externally reachable `PARKING_URL` must route to that listener.
+Keep the server running, then choose Task 10 from another terminal.
 
 ## Main dependencies
 

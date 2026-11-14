@@ -102,24 +102,12 @@ pub async fn solve() -> Result<()> {
         .post(format!("{api_base}/runs"))
         .send()
         .await
-        .context("Failed to start parking garage run")?
-        .error_for_status()
-        .context("Run request returned an error")?;
-
-    println!("Run started ({}).", response.status());
-    if let Some(location) = response.headers().get(reqwest::header::LOCATION) {
-        println!(
-            "Run status URL: {}",
-            location
-                .to_str()
-                .context("Run Location header is not valid text")?
-        );
-    }
-
+        .context("Failed to start parking garage run")?;
     let body = response
         .text()
         .await
         .context("Failed to read run response")?;
+
     if !body.trim().is_empty() {
         println!("{body}");
     }

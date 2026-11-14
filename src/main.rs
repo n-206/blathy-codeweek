@@ -1,8 +1,10 @@
 use anyhow::{Context, Result, bail};
+use dialoguer::Select;
 use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
 use std::env;
+use std::io::{self, Write};
 use tokio::sync::OnceCell;
 
 #[path = "Arena/mod.rs"]
@@ -31,6 +33,44 @@ fn join_api_url(api_root: &str, path: &str) -> String {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
+    let options = [
+        ("Zero to Hero", MenuOption::ZeroToHero),
+        ("Task 1 - Fejlec", MenuOption::Fejlec),
+        ("Task 2 - Archivum", MenuOption::Archivum),
+        ("Task 3 - Belepes", MenuOption::Belepes),
+        ("Task 4 - Labirintus", MenuOption::Labirintus),
+        ("Task 5 - Cimke", MenuOption::Cimke),
+        ("Task 6 - Expedicio", MenuOption::Expedicio),
+        ("Task 7 - Ballisztika", MenuOption::Ballisztika),
+        ("Task 8 - Vizsga", MenuOption::Vizsga),
+        ("Task 9 - Handshake", MenuOption::Handshake),
+        ("Task 10 - Parkolo", MenuOption::Parkolo),
+        ("Side mission S1", MenuOption::SideMissionS1),
+        ("Side mission S2", MenuOption::SideMissionS2),
+        ("Side mission S3", MenuOption::SideMissionS3),
+        ("Arena A1", MenuOption::ArenaA1),
+        ("Arena A2", MenuOption::ArenaA2),
+        ("Exit", MenuOption::Exit),
+    ];
+    let labels: Vec<&str> = options.iter().map(|(label, _)| *label).collect();
+    print!("\x1B[2J\x1B[H"); // Clearing terminal
+    io::stdout()
+        .flush()
+        .context("Failed to clear the terminal before showing the menu")?;
+    let Some(selection) = Select::new()
+        .with_prompt("Choose a challenge")
+        .items(&labels)
+        .default(0)
+        .interact_opt()?
+    else {
+        return Ok(());
+    };
+    let selection = options[selection].1;
+
+    if selection == MenuOption::Exit {
+        return Ok(());
+    }
+
     if std::path::Path::new(".env").exists() {
         dotenvy::from_path(".env").context("Failed to load .env")?;
     }
@@ -44,49 +84,50 @@ async fn main() -> Result<()> {
         .set(api_base)
         .map_err(|_| anyhow::anyhow!("API_BASE has already been initialized"))?;
 
-    let CLIENT = Client::new();
+    let client = Client::new();
 
-    println!("Client has been set up");
-
-    //? 1
-    // feladatok::fejlec::solve(&CLIENT).await?;
-    //? 2
-    // feladatok::archivum::solve(&CLIENT).await?;
-    //? 3
-    // feladatok::belepes::solve(&CLIENT).await?;
-    //? 4
-    // feladatok::labirintus::solve(&CLIENT).await?;
-    //? 5
-    // feladatok::cimke::solve(&CLIENT).await?;
-    //? 6
-    // feladatok::expedicio::solve(&CLIENT).await?;
-    //? 7
-    // feladatok::ballisztika::solve(&CLIENT).await?;
-    //? 8
-    // feladatok::vizsga::solve(&CLIENT).await?;
-    // ? 9
-    // feladatok::handshake::solve(&CLIENT).await?;
-    //? 10 - Make sure server is running! Start it with cargo run --bin parking_server
-    // feladatok::parkolo::solve().await?;
-
-    //* Mellék küldetések:
-    //? S1
-    // kuldetesek::s1::solve(&CLIENT).await?;
-    //? S2
-    // kuldetesek::s2::solve(&CLIENT).await?;
-    //? S3
-    //kuldetesek::s3::solve(&CLIENT).await?;
-
-    //* Aréna:
-    //? A1
-    // arena::a1::solve(&CLIENT).await?;
-    //? A2
-    // arena::a2::solve(&CLIENT).await?;
-
-    //* Zero to Hero:
-    zero_to_hero::<serde_json::Value>(&CLIENT).await?;
+    match selection {
+        MenuOption::ZeroToHero => zero_to_hero::<serde_json::Value>(&client).await?,
+        MenuOption::Fejlec => feladatok::fejlec::solve(&client).await?,
+        MenuOption::Archivum => feladatok::archivum::solve(&client).await?,
+        MenuOption::Belepes => feladatok::belepes::solve(&client).await?,
+        MenuOption::Labirintus => feladatok::labirintus::solve(&client).await?,
+        MenuOption::Cimke => feladatok::cimke::solve(&client).await?,
+        MenuOption::Expedicio => feladatok::expedicio::solve(&client).await?,
+        MenuOption::Ballisztika => feladatok::ballisztika::solve(&client).await?,
+        MenuOption::Vizsga => feladatok::vizsga::solve(&client).await?,
+        MenuOption::Handshake => feladatok::handshake::solve(&client).await?,
+        MenuOption::Parkolo => feladatok::parkolo::solve().await?,
+        MenuOption::SideMissionS1 => kuldetesek::s1::solve(&client).await?,
+        MenuOption::SideMissionS2 => kuldetesek::s2::solve(&client).await?,
+        MenuOption::SideMissionS3 => kuldetesek::s3::solve(&client).await?,
+        MenuOption::ArenaA1 => arena::a1::solve(&client).await?,
+        MenuOption::ArenaA2 => arena::a2::solve(&client).await?,
+        MenuOption::Exit => {}
+    }
 
     Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuOption {
+    ZeroToHero,
+    Fejlec,
+    Archivum,
+    Belepes,
+    Labirintus,
+    Cimke,
+    Expedicio,
+    Ballisztika,
+    Vizsga,
+    Handshake,
+    Parkolo,
+    SideMissionS1,
+    SideMissionS2,
+    SideMissionS3,
+    ArenaA1,
+    ArenaA2,
+    Exit,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,7 +205,6 @@ async fn zero_to_hero<T: for<'de> Deserialize<'de>>(client: &Client) -> Result<(
             let key = run_key.clone();
             async move { feladatok::handshake::zero_solve(&key).await }.boxed()
         },
-        { async move { feladatok::parkolo::solve().await }.boxed() }, // Doesn't need the key
     ];
 
     let mut tasks = tokio::task::JoinSet::new();
