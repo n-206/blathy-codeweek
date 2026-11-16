@@ -524,7 +524,7 @@ async fn wait_for_job(client: &reqwest::Client, location: &Url) -> Result<JobRes
                 body,
             });
         }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     bail!("Print job did not finish after {MAX_JOB_POLLS} polls")
 }

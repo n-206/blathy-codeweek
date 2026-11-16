@@ -9,8 +9,10 @@ I chose Rust because it is the language I know best, and used widely adopted
 crates from the Rust ecosystem. The project is an asynchronous client for
 Codeweek challenge APIs. It contains ten task modules, three side missions,
 two arena challenges, and a **Zero to Hero** run that submits the task
-solutions concurrently. It also includes a local parking-garage challenge
-server. Do note that I might not have thought about everything, it might break while running.
+solutions in separate OS threads so their synchronous work can run in parallel
+when CPU cores are available. It also includes a local parking-garage challenge
+server. Do note that I might not have thought about everything, it might break
+while running.
 
 ## Requirements
 
