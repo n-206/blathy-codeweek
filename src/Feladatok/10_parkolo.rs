@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, bail};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -86,8 +86,8 @@ struct ParkedCar {
     plate: String,
     entry_time: DateTime<Utc>,
 }
-
-pub async fn solve() -> Result<()> {
+#[warn(dead_code)] // solve is used in main
+pub async fn solve(client: &reqwest::Client) -> Result<()> {
     if Path::new(".env").exists() {
         dotenvy::from_path(".env").context("Failed to load .env")?;
     }
@@ -95,18 +95,47 @@ pub async fn solve() -> Result<()> {
     let api_base =
         std::env::var("API_BASE").context("API_BASE must be set in .env or the environment")?;
     if api_base.trim().is_empty() {
-        anyhow::bail!("API_BASE must not be empty");
+        bail!("API_BASE must not be empty");
     }
     let api_base = format!("{}/parking-garage", api_base.trim_end_matches('/'));
-    let response = reqwest::Client::new()
+    start_run(client, &api_base).await
+}
+#[warn(dead_code)] // solve is used in main
+pub async fn zero_solve(client: &reqwest::Client, api_base: &str) -> Result<()> {
+    start_run(client, api_base).await
+}
+
+async fn start_run(client: &reqwest::Client, api_base: &str) -> Result<()> {
+    let source_response = client
+        .get(format!("{api_base}/source"))
+        .send()
+        .await
+        .context("Failed to fetch parking garage source")?;
+    let source_status = source_response.status();
+    let source_body = source_response
+        .text()
+        .await
+        .context("Failed to read parking garage source")?;
+    if !source_status.is_success() {
+        bail!("GET /parking-garage/source returned {source_status}: {source_body}");
+    }
+    let _source: Value = serde_json::from_str(&source_body)
+        .context("Parking garage source returned invalid JSON")?;
+
+    let response = client
         .post(format!("{api_base}/runs"))
         .send()
         .await
         .context("Failed to start parking garage run")?;
+    let status = response.status();
     let body = response
         .text()
         .await
         .context("Failed to read run response")?;
+
+    if !status.is_success() {
+        bail!("POST /parking-garage/runs returned {status}: {body}");
+    }
 
     if !body.trim().is_empty() {
         println!("{body}");
@@ -118,7 +147,7 @@ pub async fn solve() -> Result<()> {
 pub fn router_with_garage(secret: impl Into<String>, garage: Value) -> Result<Router> {
     let garage: Garage = serde_json::from_value(garage)?;
     if !valid_garage(&garage) {
-        anyhow::bail!("source returned invalid garage data");
+        bail!("source returned invalid garage data");
     }
 
     let state = AppState {

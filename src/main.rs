@@ -4,7 +4,7 @@ use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
 use std::env;
-use std::io::{self, Write};
+//use std::io::{self, Write}; // for terminal clearing
 use tokio::sync::OnceCell;
 
 #[path = "Arena/mod.rs"]
@@ -48,15 +48,17 @@ async fn main() -> Result<()> {
         ("Side mission S1", MenuOption::SideMissionS1),
         ("Side mission S2", MenuOption::SideMissionS2),
         ("Side mission S3", MenuOption::SideMissionS3),
+        ("Side mission S4", MenuOption::SideMissionS4),
+        ("Side mission S5", MenuOption::SideMissionS5),
         ("Arena A1", MenuOption::ArenaA1),
         ("Arena A2", MenuOption::ArenaA2),
         ("Exit", MenuOption::Exit),
     ];
     let labels: Vec<&str> = options.iter().map(|(label, _)| *label).collect();
-    print!("\x1B[2J\x1B[H"); // Clearing terminal
-    io::stdout()
-        .flush()
-        .context("Failed to clear the terminal before showing the menu")?;
+    // print!("\x1B[2J\x1B[H"); // Clearing terminal
+    // io::stdout()
+    //     .flush()
+    //     .context("Failed to clear the terminal before showing the menu")?;
     let Some(selection) = Select::new()
         .with_prompt("Choose a challenge")
         .items(&labels)
@@ -97,10 +99,12 @@ async fn main() -> Result<()> {
         MenuOption::Ballisztika => feladatok::ballisztika::solve(&client).await?,
         MenuOption::Vizsga => feladatok::vizsga::solve(&client).await?,
         MenuOption::Handshake => feladatok::handshake::solve(&client).await?,
-        MenuOption::Parkolo => feladatok::parkolo::solve().await?,
+        MenuOption::Parkolo => feladatok::parkolo::solve(&client).await?,
         MenuOption::SideMissionS1 => kuldetesek::s1::solve(&client).await?,
         MenuOption::SideMissionS2 => kuldetesek::s2::solve(&client).await?,
         MenuOption::SideMissionS3 => kuldetesek::s3::solve(&client).await?,
+        MenuOption::SideMissionS4 => kuldetesek::s4::solve(&client).await?,
+        MenuOption::SideMissionS5 => {},
         MenuOption::ArenaA1 => arena::a1::solve(&client).await?,
         MenuOption::ArenaA2 => arena::a2::solve(&client).await?,
         MenuOption::Exit => {}
@@ -125,6 +129,8 @@ enum MenuOption {
     SideMissionS1,
     SideMissionS2,
     SideMissionS3,
+    SideMissionS4,
+    SideMissionS5,
     ArenaA1,
     ArenaA2,
     Exit,
@@ -169,6 +175,15 @@ async fn zero_to_hero<T: for<'de> Deserialize<'de>>(client: &Client) -> Result<(
     let run_key = run_resp.data.run_key;
 
     let jobs: Vec<BoxFuture<'static, Result<()>>> = vec![
+        {
+            let key = run_key.clone();
+            async move {
+                let client = feladatok::client_with_run_key(&key)?;
+                let api_base = api_url("parking-garage")?;
+                feladatok::parkolo::zero_solve(&client, &api_base).await
+            }
+            .boxed()
+        },
         {
             let key = run_key.clone();
             async move { feladatok::fejlec::zero_solve(&key).await }.boxed()
