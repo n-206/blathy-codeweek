@@ -3,9 +3,9 @@ use dialoguer::Select;
 use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
-use std::{env, time::Duration};
+use std::{env, thread};
 //use std::io::{self, Write}; // for terminal clearing
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, oneshot};
 
 #[path = "Arena/mod.rs"]
 pub mod arena;
@@ -174,64 +174,117 @@ async fn zero_to_hero<T: for<'de> Deserialize<'de>>(client: &Client) -> Result<(
     let run_resp: RunResponse<T> = serde_json::from_str(&body).context("Failed to parse body")?;
     let run_key = run_resp.data.run_key;
 
-    let jobs: Vec<BoxFuture<'static, Result<()>>> = vec![
+    let jobs: Vec<(&'static str, BoxFuture<'static, Result<()>>)> = vec![
         {
             let key = run_key.clone();
-            async move {
-                let client = feladatok::client_with_run_key(&key)?;
-                feladatok::parkolo::zero_solve(&client, &key).await
-            }
-            .boxed()
+            (
+                "parking",
+                async move {
+                    let client = feladatok::client_with_run_key(&key)?;
+                    feladatok::parkolo::zero_solve(&client, &key).await
+                }
+                .boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::fejlec::zero_solve(&key).await }.boxed()
+            (
+                "header-hunter",
+                async move { feladatok::fejlec::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::archivum::zero_solve(&key).await }.boxed()
+            (
+                "archive",
+                async move { feladatok::archivum::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::belepes::zero_solve(&key).await }.boxed()
+            (
+                "login",
+                async move { feladatok::belepes::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::labirintus::zero_solve(&key).await }.boxed()
+            (
+                "labyrinth",
+                async move { feladatok::labirintus::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::cimke::zero_solve(&key).await }.boxed()
+            (
+                "label-printer",
+                async move { feladatok::cimke::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::expedicio::zero_solve(&key).await }.boxed()
+            (
+                "expedition",
+                async move { feladatok::expedicio::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::ballisztika::zero_solve(&key).await }.boxed()
+            (
+                "ballistics",
+                async move { feladatok::ballisztika::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::vizsga::zero_solve(&key).await }.boxed()
+            (
+                "scheduler",
+                async move { feladatok::vizsga::zero_solve(&key).await }.boxed(),
+            )
         },
         {
             let key = run_key.clone();
-            async move { feladatok::handshake::zero_solve(&key).await }.boxed()
+            (
+                "handshake",
+                async move { feladatok::handshake::zero_solve(&key).await }.boxed(),
+            )
         },
     ];
 
     let mut tasks = tokio::task::JoinSet::new();
+    let runtime = tokio::runtime::Handle::current();
 
-    for job in jobs {
-        tasks.spawn(job);
+    for (name, job) in jobs {
+        let (sender, receiver) = oneshot::channel();
+        let runtime = runtime.clone();
+        thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || {
+                let _ = sender.send(runtime.block_on(job));
+            })
+            .with_context(|| format!("Failed to spawn {name} solver thread"))?;
+        tasks.spawn(async move {
+            receiver
+                .await
+                .with_context(|| format!("{name} solver thread exited without a result"))?
+        });
     }
 
+    let mut first_error = None;
     while let Some(result) = tasks.join_next().await {
-        result??; // propagate both the Tokio JoinError and the anyhow::Error
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => Err(error.into()),
+        };
+        if let Err(error) = result
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
     }
-
-    tokio::time::sleep(Duration::from_secs(60)).await; // to be sure that everything is done;
+    if let Some(error) = first_error {
+        return Err(error);
+    }
     
     let response = client.get(format!("{}/zero-to-hero", API_ROOT.get().unwrap())).send().await?;
     let status = &response.status();
