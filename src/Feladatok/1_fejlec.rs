@@ -158,6 +158,25 @@ fn evaluate(numbers: &[i128], operations: &str) -> Result<i128> {
                         .with_context(|| format!("Invalid modulo operation {operation}"))?;
                 }
             }
+            ("product-mod", Some(argument)) => {
+                let modulus = parse_integer(argument, operation)?;
+                if modulus <= 0 {
+                    bail!("Invalid modulo operation {operation}: modulus must be positive");
+                }
+                let modulus_i128 = modulus;
+                let modulus = modulus as u128;
+                let product = values
+                    .iter()
+                    .fold(1_u128 % modulus, |product, value| {
+                        multiply_mod(
+                            product,
+                            value.rem_euclid(modulus_i128) as u128,
+                            modulus,
+                        )
+                    });
+                values = vec![i128::try_from(product)
+                    .context("Product modulo result is outside the supported integer range")?];
+            }
             _ => bail!("Unsupported operation: {operation}"),
         }
     }
@@ -169,6 +188,20 @@ fn evaluate(numbers: &[i128], operations: &str) -> Result<i128> {
         );
     }
     Ok(values[0])
+}
+
+fn multiply_mod(mut left: u128, mut right: u128, modulus: u128) -> u128 {
+    let mut product = 0;
+    while right > 0 {
+        if right & 1 == 1 {
+            product = (product + left) % modulus;
+        }
+        right >>= 1;
+        if right > 0 {
+            left = (left + left) % modulus;
+        }
+    }
+    product
 }
 
 fn parse_argument(value: &str, operation: &str) -> Result<usize> {

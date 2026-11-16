@@ -4,3 +4,7 @@ pub mod s1;
 pub mod s2;
 #[path = "S3.rs"]
 pub mod s3;
+#[path = "S4.rs"]
+pub mod s4;
+#[path = "S5.rs"]
+pub mod s5;
