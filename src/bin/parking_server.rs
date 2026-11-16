@@ -1,4 +1,5 @@
 #[path = "../Feladatok/10_parkolo.rs"]
+#[allow(dead_code)]
 mod parking;
 
 use std::{env, net::SocketAddr};

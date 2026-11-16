@@ -102,6 +102,13 @@ fn evaluate(numbers: &[i128], operations: &str) -> Result<i128> {
             }
             ("filter-odd", None) => values.retain(|value| value % 2 != 0),
             ("filter-even", None) => values.retain(|value| value % 2 == 0),
+            ("double", None) => {
+                for value in &mut values {
+                    *value = value
+                        .checked_mul(2)
+                        .with_context(|| format!("Integer overflow in operation {operation}"))?;
+                }
+            }
             ("unique", None) => {
                 let mut seen = HashSet::new();
                 values.retain(|value| seen.insert(*value));
