@@ -38,18 +38,15 @@ individual task, a side mission, or an arena challenge.
 
 ### Parking-garage server
 
-The parking-garage task is available separately for testing and requires the
-parking server to be running and its public endpoint registered first. Set
-`API_BASE` and `PARKING_URL` (an externally reachable HTTPS URL for the server),
-then start it in a separate terminal:
+The parking-garage server starts on demand when Zero to Hero or Task 10 is
+selected. Set `API_BASE` and `PARKING_URL` (an externally reachable HTTPS URL
+that routes to the local listener). The default listener port is `3000`; set
+`PORT` to use another port.
 
-```sh
-cargo run --bin parking_server
-```
-
-The server listens on port `3000` by default. Set `PORT` to use a different
-port. The externally reachable `PARKING_URL` must route to that listener.
-Keep the server running, then choose Task 10 from another terminal.
+The client starts the listener automatically when needed. For manual testing,
+the server can also be started independently with
+`cargo run --bin parking_server`. Zero to Hero registers the endpoint for each
+run using that run's key.
 
 ## Main dependencies
 

@@ -1,16 +1,9 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
-    path::Path,
-};
-
-use anyhow::{Result, Context, bail};
+use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
     extract::{Request, State},
-    http::{HeaderMap, Method, StatusCode, Uri},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::any,
 };
@@ -19,14 +12,28 @@ use hmac::{Hmac, KeyInit, Mac};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::Sha256;
+use std::{
+    collections::{BTreeMap, HashMap},
+    net::SocketAddr,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const BODY_LIMIT: usize = 1024 * 1024;
 type HmacSha256 = Hmac<Sha256>;
+static PARKING_SERVER: tokio::sync::OnceCell<ServerHandle> = tokio::sync::OnceCell::const_new();
+
+struct ServerHandle {
+    run_key_echo: Arc<tokio::sync::RwLock<Option<HeaderValue>>>,
+    managed: bool,
+}
 
 #[derive(Clone)]
 struct AppState {
     secret: Arc<str>,
     garage: Arc<Mutex<GarageState>>,
+    run_key_echo: Arc<tokio::sync::RwLock<Option<HeaderValue>>>,
 }
 
 #[derive(Default)]
@@ -86,26 +93,163 @@ struct ParkedCar {
     plate: String,
     entry_time: DateTime<Utc>,
 }
-#[warn(dead_code)] // solve is used in main
+
+pub async fn zero_solve(client: &reqwest::Client, run_key: &str) -> Result<()> {
+    solve_with_client(client, Some(run_key)).await
+}
+
+pub async fn start_server_if_needed(client: &reqwest::Client) -> Result<()> {
+    start_server_for_run(client, None).await
+}
+
+async fn start_server_for_run(client: &reqwest::Client, run_key: Option<&str>) -> Result<()> {
+    let server = PARKING_SERVER.get_or_try_init(|| async {
+            configured_endpoint_url()?;
+            let api_base =
+                std::env::var("API_BASE").context("API_BASE must be set in .env or the environment")?;
+            if api_base.trim().is_empty() {
+                bail!("API_BASE must not be empty");
+            }
+            let api_base = format!("{}/parking-garage", api_base.trim_end_matches('/'));
+            let port: u16 = std::env::var("PORT")
+                .unwrap_or_else(|_| "3000".to_owned())
+                .parse()
+                .context("PORT must be a valid port number")?;
+            if port == 0 {
+                bail!("PORT must not be zero");
+            }
+            let address = SocketAddr::from(([0, 0, 0, 0], port));
+
+            let source_response = client
+                .get(format!("{api_base}/source"))
+                .send()
+                .await
+                .context("Failed to fetch parking garage source for server startup")?;
+            let source_status = source_response.status();
+            let source_body = source_response
+                .text()
+                .await
+                .context("Failed to read parking garage source for server startup")?;
+            if !source_status.is_success() {
+                bail!(
+                    "GET /parking-garage/source returned {source_status}: {source_body}"
+                );
+            }
+            let source: Value = serde_json::from_str(&source_body)
+                .context("Parking garage source returned invalid JSON")?;
+            let source = source.get("data").cloned().unwrap_or(source);
+            let source: ServerSource = serde_json::from_value(source)
+                .context("Parking garage source is missing secret or garage")?;
+
+            let listener = match tokio::net::TcpListener::bind(address).await {
+                Ok(listener) => listener,
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                    if run_key.is_some() {
+                        bail!(
+                            "PORT {port} is already in use by a server that cannot be configured to echo this Zero to Hero run key"
+                        );
+                    }
+                    let health_url = format!("http://127.0.0.1:{port}/health");
+                    let health = reqwest::Client::new()
+                        .get(&health_url)
+                        .send()
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "PORT {port} is already in use and parking server health check failed"
+                            )
+                        })?;
+                    if health.status().is_success() {
+                        return Ok(ServerHandle {
+                            run_key_echo: Arc::new(tokio::sync::RwLock::new(None)),
+                            managed: false,
+                        });
+                    }
+                    bail!(
+                        "PORT {port} is already in use, but {health_url} returned {}",
+                        health.status()
+                    );
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| format!("Failed to bind to {address}"));
+                }
+            };
+            let run_key_echo = Arc::new(tokio::sync::RwLock::new(
+                run_key.map(HeaderValue::from_str).transpose()
+                    .context("Run key is not a valid HTTP header value")?,
+            ));
+            let app = router_with_state(
+                source.secret,
+                source.garage,
+                run_key_echo.clone(),
+            )?;
+            tokio::spawn(async move {
+                if let Err(error) = axum::serve(listener, app).await {
+                    eprintln!("Parking-garage server stopped unexpectedly: {error}");
+                }
+            });
+            println!("Parking-garage server started on {address}");
+            Ok(ServerHandle {
+                run_key_echo,
+                managed: true,
+            })
+        })
+        .await?;
+    if run_key.is_some() && !server.managed {
+        bail!("The running parking server cannot be configured to echo the Zero to Hero run key");
+    }
+    if let Some(run_key) = run_key {
+        let run_key =
+            HeaderValue::from_str(run_key).context("Run key is not a valid HTTP header value")?;
+        *server.run_key_echo.write().await = Some(run_key);
+    } else {
+        *server.run_key_echo.write().await = None;
+    }
+    Ok(())
+}
+
+pub async fn register_run_endpoint(client: &reqwest::Client, api_base: &str) -> Result<()> {
+    let endpoint_url = configured_endpoint_url()?;
+
+    let response = client
+        .put(format!("{api_base}/endpoint"))
+        .json(&serde_json::json!({ "url": endpoint_url }))
+        .send()
+        .await
+        .context("Failed to register PARKING_URL for this run")?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .context("Failed to read parking endpoint registration response")?;
+    if !status.is_success() {
+        bail!("Parking endpoint registration returned {status}: {body}");
+    }
+    Ok(())
+}
+
 pub async fn solve(client: &reqwest::Client) -> Result<()> {
+    solve_with_client(client, None).await
+}
+
+async fn solve_with_client(client: &reqwest::Client, run_key: Option<&str>) -> Result<()> {
     if Path::new(".env").exists() {
         dotenvy::from_path(".env").context("Failed to load .env")?;
     }
 
+    if let Some(run_key) = run_key {
+        start_server_for_run(client, Some(run_key)).await?;
+    } else {
+        start_server_if_needed(client).await?;
+    }
     let api_base =
         std::env::var("API_BASE").context("API_BASE must be set in .env or the environment")?;
     if api_base.trim().is_empty() {
         bail!("API_BASE must not be empty");
     }
     let api_base = format!("{}/parking-garage", api_base.trim_end_matches('/'));
-    start_run(client, &api_base).await
-}
-#[warn(dead_code)] // solve is used in main
-pub async fn zero_solve(client: &reqwest::Client, api_base: &str) -> Result<()> {
-    start_run(client, api_base).await
-}
+    register_run_endpoint(&client, &api_base).await?;
 
-async fn start_run(client: &reqwest::Client, api_base: &str) -> Result<()> {
     let source_response = client
         .get(format!("{api_base}/source"))
         .send()
@@ -144,7 +288,31 @@ async fn start_run(client: &reqwest::Client, api_base: &str) -> Result<()> {
     Ok(())
 }
 
+fn configured_endpoint_url() -> Result<String> {
+    let endpoint_url =
+        std::env::var("PARKING_URL").context("PARKING_URL must be set for the parking task")?;
+    let parsed_url = reqwest::Url::parse(&endpoint_url).context("PARKING_URL is invalid")?;
+    if parsed_url.scheme() != "https" {
+        bail!("PARKING_URL must use https");
+    }
+    Ok(endpoint_url)
+}
+
+#[derive(Deserialize)]
+struct ServerSource {
+    secret: String,
+    garage: Value,
+}
+
 pub fn router_with_garage(secret: impl Into<String>, garage: Value) -> Result<Router> {
+    router_with_state(secret, garage, Arc::new(tokio::sync::RwLock::new(None)))
+}
+
+fn router_with_state(
+    secret: impl Into<String>,
+    garage: Value,
+    run_key_echo: Arc<tokio::sync::RwLock<Option<HeaderValue>>>,
+) -> Result<Router> {
     let garage: Garage = serde_json::from_value(garage)?;
     if !valid_garage(&garage) {
         bail!("source returned invalid garage data");
@@ -153,6 +321,7 @@ pub fn router_with_garage(secret: impl Into<String>, garage: Value) -> Result<Ro
     let state = AppState {
         secret: Arc::from(secret.into()),
         garage: Arc::new(Mutex::new(garage_state(garage))),
+        run_key_echo,
     };
     Ok(app_router(state))
 }
@@ -174,6 +343,11 @@ fn garage_state(garage: Garage) -> GarageState {
 }
 
 async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Response {
+    let response = dispatch_request(state.clone(), request).await;
+    echo_run_key(response, &state.run_key_echo).await
+}
+
+async fn dispatch_request(state: AppState, request: Request<Body>) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     if method == Method::GET && matches!(uri.path().rsplit('/').next(), Some("health")) {
@@ -193,31 +367,38 @@ async fn dispatch(State(state): State<AppState>, request: Request<Body>) -> Resp
     if !authorized(&state.secret, &method, &uri, &headers, &body) {
         return error(StatusCode::UNAUTHORIZED, "unauthorized");
     }
-
     let Some(sim_time) = simulated_time(&headers) else {
         return error(StatusCode::BAD_REQUEST, "invalid_request");
     };
 
     let path = uri.path();
-    if method == Method::POST && path.ends_with("/reset") {
-        return reset(&state, &body);
-    }
-    if method == Method::POST && path.ends_with("/cars") {
-        return arrive(&state, &headers, &body, sim_time);
-    }
-    if method == Method::DELETE {
-        if let Some(plate) = deleted_plate(path) {
-            return depart(&state, plate, sim_time);
+    let response = if method == Method::POST && path.ends_with("/reset") {
+        reset(&state, &body)
+    } else if method == Method::POST && path.ends_with("/cars") {
+        arrive(&state, &headers, &body, sim_time)
+    } else if method == Method::DELETE {
+        match deleted_plate(path) {
+            Some(plate) => depart(&state, plate, sim_time),
+            None => error(StatusCode::NOT_FOUND, "not_found"),
         }
-    }
-    if method == Method::GET && path.ends_with("/spots") {
-        return spots(&state, uri.query());
-    }
-    if method == Method::GET && path.ends_with("/stats") {
-        return stats(&state);
-    }
+    } else if method == Method::GET && path.ends_with("/spots") {
+        spots(&state, uri.query())
+    } else if method == Method::GET && path.ends_with("/stats") {
+        stats(&state)
+    } else {
+        error(StatusCode::NOT_FOUND, "not_found")
+    };
+    response
+}
 
-    error(StatusCode::NOT_FOUND, "not_found")
+async fn echo_run_key(
+    mut response: Response,
+    run_key: &tokio::sync::RwLock<Option<HeaderValue>>,
+) -> Response {
+    if let Some(run_key) = run_key.read().await.as_ref() {
+        response.headers_mut().insert("x-run-key", run_key.clone());
+    }
+    response
 }
 
 fn authorized(secret: &str, method: &Method, uri: &Uri, headers: &HeaderMap, body: &[u8]) -> bool {

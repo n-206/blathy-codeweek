@@ -3,7 +3,7 @@ use dialoguer::Select;
 use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
-use std::env;
+use std::{env, time::Duration};
 //use std::io::{self, Write}; // for terminal clearing
 use tokio::sync::OnceCell;
 
@@ -179,8 +179,7 @@ async fn zero_to_hero<T: for<'de> Deserialize<'de>>(client: &Client) -> Result<(
             let key = run_key.clone();
             async move {
                 let client = feladatok::client_with_run_key(&key)?;
-                let api_base = api_url("parking-garage")?;
-                feladatok::parkolo::zero_solve(&client, &api_base).await
+                feladatok::parkolo::zero_solve(&client, &key).await
             }
             .boxed()
         },
@@ -232,6 +231,17 @@ async fn zero_to_hero<T: for<'de> Deserialize<'de>>(client: &Client) -> Result<(
         result??; // propagate both the Tokio JoinError and the anyhow::Error
     }
 
-    println!("Zero to hero solved!");
+    tokio::time::sleep(Duration::from_secs(60)).await; // to be sure that everything is done;
+    
+    let response = client.get(format!("{}/zero-to-hero", API_ROOT.get().unwrap())).send().await?;
+    let status = &response.status();
+    let body = &response.text().await?;
+    if !status.is_success() {
+        bail!("POST /start returned {status}: {}", &body);
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&body)
+        .context("Failed to parse zero-to-hero response as JSON")?;
+    println!("{}", serde_json::to_string_pretty(&parsed)?);
+
     Ok(())
 }
