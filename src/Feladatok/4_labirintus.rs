@@ -210,11 +210,17 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct SearchState {
-    room: String,
+    room: usize,
     keys: Vec<u64>,
 }
 
 fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<String>> {
+    let room_ids: Vec<&str> = rooms.keys().map(String::as_str).collect();
+    let room_indexes: HashMap<&str, usize> = room_ids
+        .iter()
+        .enumerate()
+        .map(|(index, room_id)| (*room_id, index))
+        .collect();
     let mut key_indexes = HashMap::new();
     for room in rooms.values() {
         for item in &room.items {
@@ -229,9 +235,12 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
         }
     }
 
-    let mut room_keys: HashMap<&str, Vec<usize>> = HashMap::new();
-    for room in rooms.values() {
-        let indexes = room
+    let mut room_keys = vec![Vec::new(); room_ids.len()];
+    for (room_index, room_id) in room_ids.iter().enumerate() {
+        let room = rooms
+            .get(*room_id)
+            .with_context(|| format!("Room {room_id} is missing from the explored map"))?;
+        room_keys[room_index] = room
             .items
             .iter()
             .filter(|item| item.item_type == "key")
@@ -242,15 +251,14 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
             })
             .copied()
             .collect();
-        room_keys.insert(&room.id, indexes);
     }
 
-    if !rooms.contains_key(entrance) {
-        bail!("Entrance room {entrance} was not explored");
-    }
+    let entrance_index = *room_indexes
+        .get(entrance)
+        .with_context(|| format!("Entrance room {entrance} was not explored"))?;
     let initial_state = SearchState {
-        room: entrance.to_owned(),
-        keys: keys_for_room(&[], room_keys.get(entrance).map(Vec::as_slice)),
+        room: entrance_index,
+        keys: keys_for_room(&[], &room_keys[entrance_index]),
     };
 
     let mut best_cost = HashMap::from([(initial_state.clone(), 0_u64)]);
@@ -265,9 +273,10 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
             continue;
         }
 
+        let room_id = room_ids[state.room];
         let room = rooms
-            .get(&state.room)
-            .with_context(|| format!("Room {} is missing from the explored map", state.room))?;
+            .get(room_id)
+            .with_context(|| format!("Room {room_id} is missing from the explored map"))?;
         if room.exit {
             destination = Some(state);
             break;
@@ -286,15 +295,15 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
                 }
             }
 
-            if !rooms.contains_key(next_room_id) {
-                bail!(
+            let next_room_index = *room_indexes.get(next_room_id).with_context(|| {
+                format!(
                     "Passage {} leads to unexplored room {next_room_id}",
                     passage.door
-                );
-            }
+                )
+            })?;
             let next_state = SearchState {
-                room: next_room_id.to_owned(),
-                keys: keys_for_room(&state.keys, room_keys.get(next_room_id).map(Vec::as_slice)),
+                room: next_room_index,
+                keys: keys_for_room(&state.keys, &room_keys[next_room_index]),
             };
             let next_cost = cost
                 .checked_add(u64::from(passage.cost))
@@ -314,25 +323,23 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
     }
 
     let mut state = destination.context("No route from the entrance to an exit was found")?;
-    let mut path = vec![state.room.clone()];
+    let mut path = vec![room_ids[state.room].to_owned()];
     while let Some(predecessor) = previous.remove(&state) {
         state = predecessor;
-        path.push(state.room.clone());
+        path.push(room_ids[state.room].to_owned());
     }
     path.reverse();
     Ok(path)
 }
 
-fn keys_for_room(existing: &[u64], room_keys: Option<&[usize]>) -> Vec<u64> {
+fn keys_for_room(existing: &[u64], room_keys: &[usize]) -> Vec<u64> {
     let mut keys = existing.to_vec();
-    if let Some(room_keys) = room_keys {
-        for &key_index in room_keys {
-            let word = key_index / u64::BITS as usize;
-            if keys.len() <= word {
-                keys.resize(word + 1, 0);
-            }
-            keys[word] |= 1_u64 << (key_index % u64::BITS as usize);
+    for &key_index in room_keys {
+        let word = key_index / u64::BITS as usize;
+        if keys.len() <= word {
+            keys.resize(word + 1, 0);
         }
+        keys[word] |= 1_u64 << (key_index % u64::BITS as usize);
     }
     keys
 }
