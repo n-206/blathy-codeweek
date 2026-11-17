@@ -93,6 +93,9 @@ struct Search<'a> {
     shared_students: &'a [Vec<usize>],
     conflicts: Vec<Vec<bool>>,
     assigned: Vec<Option<Candidate>>,
+    assigned_indices: Vec<usize>,
+    day_shared_scores: Vec<Vec<usize>>,
+    day_exam_counts: Vec<usize>,
     best: Option<Vec<Candidate>>,
     best_score: usize,
     max_score: usize,
@@ -137,6 +140,9 @@ pub async fn solve(client: &Client) -> Result<()> {
         shared_students: &shared_students,
         conflicts,
         assigned: vec![None; source.exams.len()],
+        assigned_indices: Vec::with_capacity(source.exams.len()),
+        day_shared_scores: vec![vec![0; source.days.len()]; source.exams.len()],
+        day_exam_counts: vec![0; source.days.len()],
         best: None,
         best_score: usize::MAX,
         max_score: source.goal.max_score,
@@ -288,12 +294,22 @@ impl Search<'_> {
         }
 
         selected_domain.sort_by_key(|(candidate, added_score)| {
-            (*added_score, candidate.day, candidate.start, candidate.room)
+            (
+                *added_score,
+                self.day_exam_counts[candidate.day],
+                candidate.day,
+                candidate.start,
+                candidate.room,
+            )
         });
         let exam_index = selected.expect("an unassigned exam exists");
         for (candidate, added_score) in selected_domain {
             self.assigned[exam_index] = Some(candidate);
+            self.assigned_indices.push(exam_index);
+            self.adjust_day_state(exam_index, candidate.day, true);
             self.visit(assigned_count + 1, score + added_score);
+            self.adjust_day_state(exam_index, candidate.day, false);
+            self.assigned_indices.pop();
             self.assigned[exam_index] = None;
             if self.stopped {
                 return;
@@ -302,7 +318,7 @@ impl Search<'_> {
     }
 
     fn fits_assigned(&self, exam_index: usize, candidate: &Candidate) -> bool {
-        (0..self.exams.len()).all(|other| {
+        self.assigned_indices.iter().all(|&other| {
             let Some(other_candidate) = self.assigned[other] else {
                 return true;
             };
@@ -317,15 +333,23 @@ impl Search<'_> {
     }
 
     fn incremental_score(&self, exam_index: usize, day: usize) -> usize {
-        self.assigned
-            .iter()
-            .enumerate()
-            .filter_map(|(other, candidate)| {
-                candidate
-                    .filter(|candidate| candidate.day == day)
-                    .map(|_| self.shared_students[exam_index][other])
-            })
-            .sum()
+        self.day_shared_scores[exam_index][day]
+    }
+
+    fn adjust_day_state(&mut self, exam_index: usize, day: usize, adding: bool) {
+        for other in 0..self.exams.len() {
+            let shared = self.shared_students[exam_index][other];
+            if adding {
+                self.day_shared_scores[other][day] += shared;
+            } else {
+                self.day_shared_scores[other][day] -= shared;
+            }
+        }
+        if adding {
+            self.day_exam_counts[day] += 1;
+        } else {
+            self.day_exam_counts[day] -= 1;
+        }
     }
 }
 
