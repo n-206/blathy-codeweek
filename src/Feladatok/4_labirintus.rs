@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, bail};
+use futures::{StreamExt, TryStreamExt, stream};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+
+const REQUEST_CONCURRENCY: usize = 8;
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
@@ -126,83 +129,138 @@ pub async fn zero_solve(run_key: &str) -> Result<()> {
 async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room>> {
     let mut rooms = HashMap::new();
     let mut pending = VecDeque::from([entrance.to_owned()]);
+    let mut discovered = HashSet::from([entrance.to_owned()]);
     let mut keys = HashSet::new();
 
     loop {
-        while let Some(room_id) = pending.pop_front() {
-            if rooms.contains_key(&room_id) {
-                continue;
-            }
-
-            let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
-            for item in &room.items {
-                if item.item_type != "key" {
-                    continue;
+        while !pending.is_empty() {
+            let batch: Vec<_> = (0..REQUEST_CONCURRENCY)
+                .filter_map(|_| pending.pop_front())
+                .collect();
+            let discovered_rooms = stream::iter(batch.into_iter().map(|room_id| async move {
+                let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
+                for item in &room.items {
+                    if item.item_type == "key" {
+                        item.color.as_deref().with_context(|| {
+                            format!("Key {} in room {room_id} has no color", item.id)
+                        })?;
+                    }
                 }
+                for item in &room.items {
+                    if item.item_type == "key" && item.picked_up != Some(true) {
+                        send_action(
+                            client
+                                .post(crate::api_url(&format!("labyrinth/room/{room_id}/pickup"))?)
+                                .json(&json!({ "item": item.id })),
+                            &format!("POST /room/{room_id}/pickup"),
+                        )
+                        .await?;
+                    }
+                }
+                Ok::<_, anyhow::Error>((room_id, room))
+            }))
+            .buffer_unordered(REQUEST_CONCURRENCY)
+            .try_collect::<Vec<_>>()
+            .await?;
 
-                let color = item
-                    .color
-                    .as_deref()
-                    .with_context(|| format!("Key {} in room {room_id} has no color", item.id))?;
-                keys.insert(color.to_owned());
+            for (room_id, room) in discovered_rooms {
+                for item in &room.items {
+                    if item.item_type == "key" {
+                        let color = item.color.as_deref().with_context(|| {
+                            format!("Key {} in room {room_id} has no color", item.id)
+                        })?;
+                        keys.insert(color.to_owned());
+                    }
+                }
+                for passage in &room.exits {
+                    if let Some(destination) = &passage.to
+                        && discovered.insert(destination.clone())
+                    {
+                        pending.push_back(destination.clone());
+                    }
+                }
+                rooms.insert(room_id, room);
+            }
+        }
 
-                if item.picked_up != Some(true) {
+        let locked_doors: Vec<_> = rooms
+            .iter()
+            .flat_map(|(room_id, room)| {
+                room.exits
+                    .iter()
+                    .filter(|passage| {
+                        passage.locked
+                            && passage
+                                .lock
+                                .as_ref()
+                                .is_some_and(|color| keys.contains(color))
+                    })
+                    .filter_map(|passage| {
+                        passage
+                            .lock
+                            .as_ref()
+                            .map(|color| (room_id.clone(), passage.door.clone(), color.clone()))
+                    })
+            })
+            .collect();
+
+        if locked_doors.is_empty() {
+            break;
+        }
+
+        stream::iter(
+            locked_doors
+                .iter()
+                .cloned()
+                .map(|(room_id, door_id, color)| async move {
                     send_action(
                         client
-                            .post(crate::api_url(&format!("labyrinth/room/{room_id}/pickup"))?)
-                            .json(&json!({ "item": item.id })),
-                        &format!("POST /room/{room_id}/pickup"),
+                            .patch(crate::api_url(&format!("labyrinth/door/{door_id}"))?)
+                            .json(&json!({ "key": color })),
+                        &format!("PATCH /door/{door_id}"),
                     )
-                    .await?;
-                }
-            }
+                    .await
+                    .with_context(|| format!("Could not unlock door {door_id} from room {room_id}"))
+                }),
+        )
+        .buffer_unordered(REQUEST_CONCURRENCY)
+        .try_collect::<Vec<_>>()
+        .await?;
 
+        let rooms_to_refresh: HashSet<_> = locked_doors
+            .iter()
+            .map(|(room_id, _, _)| room_id.clone())
+            .collect();
+        let refreshed_rooms =
+            stream::iter(rooms_to_refresh.into_iter().map(|room_id| async move {
+                let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
+                Ok::<_, anyhow::Error>((room_id, room))
+            }))
+            .buffer_unordered(REQUEST_CONCURRENCY)
+            .try_collect::<Vec<_>>()
+            .await?;
+        let refreshed_rooms: HashMap<_, _> = refreshed_rooms.into_iter().collect();
+
+        for (room_id, door_id, _) in &locked_doors {
+            let passage = refreshed_rooms
+                .get(room_id)
+                .and_then(|room| room.exits.iter().find(|passage| passage.door == *door_id))
+                .with_context(|| format!("Room {room_id} no longer lists opened door {door_id}"))?;
+            if passage.locked || passage.to.is_none() {
+                bail!("Door {door_id} did not become traversable after unlocking");
+            }
+        }
+
+        for (room_id, room) in refreshed_rooms {
             for passage in &room.exits {
-                if let Some(destination) = &passage.to {
+                if let Some(destination) = &passage.to
+                    && discovered.insert(destination.clone())
+                {
                     pending.push_back(destination.clone());
                 }
             }
             rooms.insert(room_id, room);
         }
-
-        let locked_door = rooms.iter().find_map(|(room_id, room)| {
-            room.exits.iter().find_map(|passage| {
-                (passage.locked
-                    && passage
-                        .lock
-                        .as_ref()
-                        .is_some_and(|color| keys.contains(color)))
-                .then(|| {
-                    (
-                        room_id.clone(),
-                        passage.door.clone(),
-                        passage.lock.clone().expect("lock checked above"),
-                    )
-                })
-            })
-        });
-
-        let Some((room_id, door_id, color)) = locked_door else {
-            break;
-        };
-
-        send_action(
-            client
-                .patch(crate::api_url(&format!("labyrinth/door/{door_id}"))?)
-                .json(&json!({ "key": color })),
-            &format!("PATCH /door/{door_id}"),
-        )
-        .await?;
-
-        let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
-        let opened_door = room.exits.iter().find(|passage| passage.door == door_id);
-        let opened_door = opened_door
-            .with_context(|| format!("Room {room_id} no longer lists opened door {door_id}"))?;
-        if opened_door.locked || opened_door.to.is_none() {
-            bail!("Door {door_id} did not become traversable after unlocking");
-        }
-        pending.push_back(opened_door.to.clone().expect("checked above"));
-        rooms.insert(room_id, room);
     }
 
     Ok(rooms)
@@ -236,10 +294,13 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
     }
 
     let mut room_keys = vec![Vec::new(); room_ids.len()];
+    let mut room_exits = vec![false; room_ids.len()];
+    let mut passages = vec![Vec::new(); room_ids.len()];
     for (room_index, room_id) in room_ids.iter().enumerate() {
         let room = rooms
             .get(*room_id)
             .with_context(|| format!("Room {room_id} is missing from the explored map"))?;
+        room_exits[room_index] = room.exit;
         room_keys[room_index] = room
             .items
             .iter()
@@ -251,6 +312,27 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
             })
             .copied()
             .collect();
+        for passage in &room.exits {
+            let Some(destination) = passage.to.as_deref() else {
+                continue;
+            };
+            let Some(next_room_index) = room_indexes.get(destination).copied() else {
+                bail!(
+                    "Passage {} leads to unexplored room {destination}",
+                    passage.door
+                );
+            };
+            let required_key = match passage.lock.as_ref() {
+                Some(lock) => {
+                    let Some(&key_index) = key_indexes.get(lock) else {
+                        continue;
+                    };
+                    Some(key_index)
+                }
+                None => None,
+            };
+            passages[room_index].push((next_room_index, passage.cost, required_key));
+        }
     }
 
     let entrance_index = *room_indexes
@@ -262,71 +344,63 @@ fn shortest_path(rooms: &HashMap<String, Room>, entrance: &str) -> Result<Vec<St
     };
 
     let mut best_cost = HashMap::from([(initial_state.clone(), 0_u64)]);
-    let mut previous: HashMap<SearchState, SearchState> = HashMap::new();
-    let mut states = vec![initial_state.clone()];
+    let mut states = vec![initial_state];
+    let mut previous = vec![None];
     let mut queue = BinaryHeap::from([Reverse((0_u64, 0_usize))]);
     let mut destination = None;
 
     while let Some(Reverse((cost, state_index))) = queue.pop() {
-        let state = states[state_index].clone();
-        if best_cost.get(&state) != Some(&cost) {
+        if best_cost.get(&states[state_index]) != Some(&cost) {
             continue;
         }
 
-        let room_id = room_ids[state.room];
-        let room = rooms
-            .get(room_id)
-            .with_context(|| format!("Room {room_id} is missing from the explored map"))?;
-        if room.exit {
-            destination = Some(state);
+        let room_index = states[state_index].room;
+        if room_exits[room_index] {
+            destination = Some(state_index);
             break;
         }
 
-        for passage in &room.exits {
-            let Some(next_room_id) = passage.to.as_deref() else {
-                continue;
-            };
-            if let Some(lock) = &passage.lock {
-                let Some(&key_index) = key_indexes.get(lock) else {
-                    continue;
-                };
-                if !has_key(&state.keys, key_index) {
+        let successors = {
+            let state = &states[state_index];
+            let mut successors = Vec::new();
+            for &(next_room_index, passage_cost, required_key) in &passages[room_index] {
+                if required_key.is_some_and(|key_index| !has_key(&state.keys, key_index)) {
                     continue;
                 }
+                let next_state = SearchState {
+                    room: next_room_index,
+                    keys: keys_for_room(&state.keys, &room_keys[next_room_index]),
+                };
+                let next_cost = cost
+                    .checked_add(u64::from(passage_cost))
+                    .context("Route cost overflowed")?;
+                if best_cost
+                    .get(&next_state)
+                    .is_some_and(|known_cost| *known_cost <= next_cost)
+                {
+                    continue;
+                }
+                successors.push((next_cost, next_state));
             }
+            successors
+        };
 
-            let next_room_index = *room_indexes.get(next_room_id).with_context(|| {
-                format!(
-                    "Passage {} leads to unexplored room {next_room_id}",
-                    passage.door
-                )
-            })?;
-            let next_state = SearchState {
-                room: next_room_index,
-                keys: keys_for_room(&state.keys, &room_keys[next_room_index]),
-            };
-            let next_cost = cost
-                .checked_add(u64::from(passage.cost))
-                .context("Route cost overflowed")?;
-            if best_cost
-                .get(&next_state)
-                .is_some_and(|known_cost| *known_cost <= next_cost)
-            {
-                continue;
-            }
-
+        for (next_cost, next_state) in successors {
             best_cost.insert(next_state.clone(), next_cost);
-            previous.insert(next_state.clone(), state.clone());
+            previous.push(Some(state_index));
             states.push(next_state);
             queue.push(Reverse((next_cost, states.len() - 1)));
         }
     }
 
-    let mut state = destination.context("No route from the entrance to an exit was found")?;
-    let mut path = vec![room_ids[state.room].to_owned()];
-    while let Some(predecessor) = previous.remove(&state) {
-        state = predecessor;
-        path.push(room_ids[state.room].to_owned());
+    let mut state_index = destination.context("No route from the entrance to an exit was found")?;
+    let mut path = Vec::new();
+    loop {
+        path.push(room_ids[states[state_index].room].to_owned());
+        let Some(predecessor) = previous[state_index] else {
+            break;
+        };
+        state_index = predecessor;
     }
     path.reverse();
     Ok(path)
