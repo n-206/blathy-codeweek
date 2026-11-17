@@ -91,6 +91,7 @@ struct Search<'a> {
     exams: &'a [Exam],
     candidates: &'a [Vec<Candidate>],
     shared_students: &'a [Vec<usize>],
+    conflicts: Vec<Vec<bool>>,
     assigned: Vec<Option<Candidate>>,
     best: Option<Vec<Candidate>>,
     best_score: usize,
@@ -116,11 +117,25 @@ pub async fn solve(client: &Client) -> Result<()> {
     let absences = parse_absences(&availability, &source)?;
     let domains = build_domains(&source, &students, &absences)?;
     let shared_students = student_intersections(&students);
+    let conflicts = (0..source.exams.len())
+        .map(|left| {
+            (0..source.exams.len())
+                .map(|right| {
+                    left != right
+                        && (shared_students[left][right] > 0
+                            || source.exams[left]
+                                .teacher
+                                .eq_ignore_ascii_case(&source.exams[right].teacher))
+                })
+                .collect()
+        })
+        .collect();
 
     let mut search = Search {
         exams: &source.exams,
         candidates: &domains,
         shared_students: &shared_students,
+        conflicts,
         assigned: vec![None; source.exams.len()],
         best: None,
         best_score: usize::MAX,
@@ -256,12 +271,7 @@ impl Search<'_> {
             }
             let degree = (0..self.exams.len())
                 .filter(|&other| {
-                    self.assigned[other].is_none()
-                        && other != exam_index
-                        && (self.shared_students[exam_index][other] > 0
-                            || self.exams[exam_index]
-                                .teacher
-                                .eq_ignore_ascii_case(&self.exams[other].teacher))
+                    self.assigned[other].is_none() && self.conflicts[exam_index][other]
                 })
                 .count();
             if selected.is_none()
@@ -302,11 +312,7 @@ impl Search<'_> {
             {
                 return true;
             }
-            candidate.room != other_candidate.room
-                && !self.exams[exam_index]
-                    .teacher
-                    .eq_ignore_ascii_case(&self.exams[other].teacher)
-                && self.shared_students[exam_index][other] == 0
+            candidate.room != other_candidate.room && !self.conflicts[exam_index][other]
         })
     }
 
@@ -478,6 +484,27 @@ fn build_domains(
         .collect::<Result<_>>()?;
     let mut slots: Vec<&Slot> = source.slots.iter().collect();
     slots.sort_by_key(|slot| slot.slot);
+    let slot_times = slots
+        .iter()
+        .map(|slot| {
+            Ok((
+                parse_clock(&slot.start)
+                    .with_context(|| format!("Invalid start time for slot {}", slot.slot))?,
+                parse_clock(&slot.end)
+                    .with_context(|| format!("Invalid end time for slot {}", slot.slot))?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let room_equipment: Vec<HashSet<String>> = source
+        .rooms
+        .iter()
+        .map(|room| {
+            room.equipment
+                .iter()
+                .map(|equipment| equipment.to_lowercase())
+                .collect()
+        })
+        .collect();
     let mut domains = Vec::with_capacity(source.exams.len());
     for (exam_index, exam) in source.exams.iter().enumerate() {
         if exam.duration == 0 {
@@ -495,9 +522,9 @@ fn build_domains(
                 let Some(last_slot_index) = slot_index.checked_add(exam.duration - 1) else {
                     continue;
                 };
-                let Some(last_slot) = slots.get(last_slot_index) else {
+                if last_slot_index >= slots.len() {
                     continue;
-                };
+                }
                 let first_slot = slots[slot_index];
                 if slots[slot_index..=last_slot_index]
                     .windows(2)
@@ -505,10 +532,8 @@ fn build_domains(
                 {
                     continue;
                 }
-                let start = parse_clock(&first_slot.start)
-                    .with_context(|| format!("Invalid start time for slot {}", first_slot.slot))?;
-                let end = parse_clock(&last_slot.end)
-                    .with_context(|| format!("Invalid end time for slot {}", last_slot.slot))?;
+                let start = slot_times[slot_index].0;
+                let end = slot_times[last_slot_index].1;
                 if end <= start {
                     continue;
                 }
@@ -522,12 +547,8 @@ fn build_domains(
                     continue;
                 }
                 for (room_index, room) in source.rooms.iter().enumerate() {
-                    let available: HashSet<String> = room
-                        .equipment
-                        .iter()
-                        .map(|equipment| equipment.to_lowercase())
-                        .collect();
-                    if students[exam_index].len() > room.capacity || !required.is_subset(&available)
+                    if students[exam_index].len() > room.capacity
+                        || !required.is_subset(&room_equipment[room_index])
                     {
                         continue;
                     }
