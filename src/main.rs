@@ -104,7 +104,7 @@ async fn main() -> Result<()> {
         MenuOption::SideMissionS2 => kuldetesek::s2::solve(&client).await?,
         MenuOption::SideMissionS3 => kuldetesek::s3::solve(&client).await?,
         MenuOption::SideMissionS4 => kuldetesek::s4::solve(&client).await?,
-        MenuOption::SideMissionS5 => {},
+        MenuOption::SideMissionS5 => kuldetesek::s5::solve(&client).await?,
         MenuOption::ArenaA1 => arena::a1::solve(&client).await?,
         MenuOption::ArenaA2 => arena::a2::solve(&client).await?,
         MenuOption::Exit => {}
