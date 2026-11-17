@@ -14,7 +14,7 @@ when CPU cores are available. Originally it was concurrent and I got a 17.5 seco
 It also includes a local parking-garage challenge
 server. Do note that I might not have thought about everything, so things might break
 while running.
-Currently the slowest tasks are 4 and 8. 4 has to do lots of api calls and 8 has to go through lots of possible variants. There is a hard limit, 12 seconds and 500_000 nodes for task 8. There are times when it doesn't find the solution in time. I'm working on optimizing these tasks.
+Currently the slowest tasks are 4, 5 and 8. 4 has to do lots of api calls and 8 has to go through lots of possible variants. There is a hard limit, 12 seconds and 500_000 nodes for task 8. There are times when it doesn't find the solution in time. I'm working on optimizing these tasks.
 
 ## Requirements
 
