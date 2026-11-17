@@ -5,8 +5,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::time::Duration;
 
 const REQUEST_CONCURRENCY: usize = 8;
+const ROOM_API_REQUEST_INTERVAL: Duration = Duration::from_millis(60);
+
+struct RequestRateLimiter {
+    next_request: tokio::sync::Mutex<tokio::time::Instant>,
+}
+
+impl RequestRateLimiter {
+    fn new() -> Self {
+        Self {
+            next_request: tokio::sync::Mutex::new(tokio::time::Instant::now()),
+        }
+    }
+
+    async fn wait(&self) {
+        let mut next_request = self.next_request.lock().await;
+        let now = tokio::time::Instant::now();
+        if *next_request > now {
+            tokio::time::sleep_until(*next_request).await;
+        }
+        *next_request = tokio::time::Instant::now() + ROOM_API_REQUEST_INTERVAL;
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse<T> {
@@ -58,7 +81,14 @@ pub struct Solution {
     pub path: Vec<String>,
 }
 
-async fn get_data<T: for<'de> Deserialize<'de>>(client: &Client, endpoint: &str) -> Result<T> {
+async fn get_data<T: for<'de> Deserialize<'de>>(
+    client: &Client,
+    endpoint: &str,
+    rate_limiter: Option<&RequestRateLimiter>,
+) -> Result<T> {
+    if let Some(rate_limiter) = rate_limiter {
+        rate_limiter.wait().await;
+    }
     let response = client
         .get(crate::api_url(&format!("labyrinth{endpoint}"))?)
         .send()
@@ -86,7 +116,12 @@ async fn get_data<T: for<'de> Deserialize<'de>>(client: &Client, endpoint: &str)
     })
 }
 
-async fn send_action(request: reqwest::RequestBuilder, description: &str) -> Result<()> {
+async fn send_action(
+    request: reqwest::RequestBuilder,
+    description: &str,
+    rate_limiter: &RequestRateLimiter,
+) -> Result<()> {
+    rate_limiter.wait().await;
     let response = request
         .send()
         .await
@@ -114,7 +149,7 @@ async fn send_action(request: reqwest::RequestBuilder, description: &str) -> Res
 }
 
 pub async fn solve(client: &Client) -> Result<()> {
-    let source: Source = get_data(client, "/source").await?;
+    let source: Source = get_data(client, "/source", None).await?;
     let rooms = explore(client, &source.entrance).await?;
     let path = shortest_path(&rooms, &source.entrance)?;
     let solution = Solution { path };
@@ -127,6 +162,7 @@ pub async fn zero_solve(run_key: &str) -> Result<()> {
 }
 
 async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room>> {
+    let rate_limiter = RequestRateLimiter::new();
     let mut rooms = HashMap::new();
     let mut pending = VecDeque::from([entrance.to_owned()]);
     let mut discovered = HashSet::from([entrance.to_owned()]);
@@ -137,8 +173,10 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
             let batch: Vec<_> = (0..REQUEST_CONCURRENCY)
                 .filter_map(|_| pending.pop_front())
                 .collect();
+            let limiter = &rate_limiter;
             let discovered_rooms = stream::iter(batch.into_iter().map(|room_id| async move {
-                let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
+                let room: Room =
+                    get_data(client, &format!("/room/{room_id}"), Some(limiter)).await?;
                 for item in &room.items {
                     if item.item_type == "key" {
                         item.color.as_deref().with_context(|| {
@@ -153,6 +191,7 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
                                 .post(crate::api_url(&format!("labyrinth/room/{room_id}/pickup"))?)
                                 .json(&json!({ "item": item.id })),
                             &format!("POST /room/{room_id}/pickup"),
+                            limiter,
                         )
                         .await?;
                     }
@@ -208,6 +247,7 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
             break;
         }
 
+        let limiter = &rate_limiter;
         stream::iter(
             locked_doors
                 .iter()
@@ -218,6 +258,7 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
                             .patch(crate::api_url(&format!("labyrinth/door/{door_id}"))?)
                             .json(&json!({ "key": color })),
                         &format!("PATCH /door/{door_id}"),
+                        limiter,
                     )
                     .await
                     .with_context(|| format!("Could not unlock door {door_id} from room {room_id}"))
@@ -231,9 +272,11 @@ async fn explore(client: &Client, entrance: &str) -> Result<HashMap<String, Room
             .iter()
             .map(|(room_id, _, _)| room_id.clone())
             .collect();
+        let limiter = &rate_limiter;
         let refreshed_rooms =
             stream::iter(rooms_to_refresh.into_iter().map(|room_id| async move {
-                let room: Room = get_data(client, &format!("/room/{room_id}")).await?;
+                let room: Room =
+                    get_data(client, &format!("/room/{room_id}"), Some(limiter)).await?;
                 Ok::<_, anyhow::Error>((room_id, room))
             }))
             .buffer_unordered(REQUEST_CONCURRENCY)
