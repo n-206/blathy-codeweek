@@ -47,6 +47,16 @@ fn main() {
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        rocm_path.join("lib").display()
+    );
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!(
+            "cargo:rustc-link-arg=-Wl,-rpath,{}",
+            rocm_path.join("lib").display()
+        );
+    }
     println!("cargo:rustc-link-lib=static=s3_hip");
     println!("cargo:rustc-link-lib=dylib=amdhip64");
     println!("cargo:rustc-link-lib=dylib=stdc++");

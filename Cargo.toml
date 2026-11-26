@@ -6,7 +6,7 @@ default-run = "codeweek"
 build = "build.rs"
 
 [features]
-hip = ["dep:hip-rs"]
+hip = []
 
 [dependencies]
 
@@ -15,7 +15,6 @@ aes-gcm = { version = "0.11.1", default-features = false, features = ["aes", "al
 hkdf = "0.13.0"
 p256 = { version = "0.14.0", features = ["ecdh", "ecdsa", "pem"] }
 sha2 = "0.11.1"
-hip-rs = { version = "1.0.0", optional = true }
 
 # HTTP
 axum = "0.8"

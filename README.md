@@ -60,14 +60,14 @@ The project uses crates from several commonly used Rust ecosystem areas:
 - **Serialization:** Serde, Serde JSON, Serde XML, Serde YAML, CSV
 - **Cryptography:** AES-GCM, HKDF, P-256, SHA-1, SHA-2, HMAC
 - **Utilities:** Anyhow, Chrono, Base64, Hex, Flate2, dotenvy
-- **Optional GPU acceleration:** `hip-rs` for the S3 mining task on AMD GPUs
+- **Optional GPU acceleration:** AMD HIP runtime for the S3 mining task
 
 Side mission S3 uses threaded CPU mining when no AMD GPU is detected. If an
 AMD GPU is detected, ROCm and HIP support are required; without ROCm the task
 returns an error instead of silently switching back to the CPU. Build with
 `cargo run --features hip` to enable the HIP kernel. Set `ROCM_PATH` if ROCm is
 installed somewhere other than `/opt/rocm`. The default build does not require
-ROCm.
+ROCm. The HIP kernel uses the ROCm runtime through a small native C++ bridge.
 
 See [`Cargo.toml`](Cargo.toml) for the full dependency list.
 
