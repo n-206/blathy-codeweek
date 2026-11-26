@@ -142,17 +142,19 @@ async fn find_nonce(challenge: &str, zeros: usize, deadline: Instant) -> Result<
     }
 
     if !rocm_is_installed() {
-        println!("AMD GPU detected, but ROCm is not installed or hipcc is unavailable. Switching to CPU mining.");
-        return find_nonce_cpu(challenge, zeros, deadline).await;
+        bail!("AMD GPU detected, but ROCm is not installed or hipcc is unavailable");
     }
 
     #[cfg(feature = "hip")]
     {
         return find_nonce_hip(challenge, zeros, deadline).await;
     }
-    
-    println!("HIP feature is not enabled. Switching to CPU mining.");
-    return find_nonce_cpu(challenge, zeros, deadline).await;
+
+    #[cfg(not(feature = "hip"))]
+    {
+        println!("HIP feature is not enabled. Switching to CPU mining.");
+        find_nonce_cpu(challenge, zeros, deadline).await
+    }
 }
 
 async fn find_nonce_cpu(challenge: &str, zeros: usize, deadline: Instant) -> Result<String> {
@@ -270,12 +272,6 @@ async fn find_nonce_hip(challenge: &str, zeros: usize, deadline: Instant) -> Res
         return find_nonce_cpu(challenge, zeros, deadline)
             .await
             .context("Challenge is too long for the HIP kernel; CPU search failed");
-    }
-
-    let device_count = hip_rs::get_device_count()
-        .map_err(|error| anyhow!("Could not query HIP devices: {error:?}"))?;
-    if device_count <= 0 {
-        bail!("ROCm is installed, but HIP reports no available GPU devices");
     }
 
     let remaining = deadline.saturating_duration_since(Instant::now());
