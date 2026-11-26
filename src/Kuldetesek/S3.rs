@@ -1,7 +1,14 @@
+#[cfg(feature = "hip")]
+use anyhow::anyhow;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::env;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -130,6 +137,25 @@ fn validate_challenge(challenge: &Challenge) -> Result<()> {
 }
 
 async fn find_nonce(challenge: &str, zeros: usize, deadline: Instant) -> Result<String> {
+    if !has_amd_gpu()? {
+        return find_nonce_cpu(challenge, zeros, deadline).await;
+    }
+
+    if !rocm_is_installed() {
+        println!("AMD GPU detected, but ROCm is not installed or hipcc is unavailable. Switching to CPU mining.");
+        return find_nonce_cpu(challenge, zeros, deadline).await;
+    }
+
+    #[cfg(feature = "hip")]
+    {
+        return find_nonce_hip(challenge, zeros, deadline).await;
+    }
+    
+    println!("HIP feature is not enabled. Switching to CPU mining.");
+    return find_nonce_cpu(challenge, zeros, deadline).await;
+}
+
+async fn find_nonce_cpu(challenge: &str, zeros: usize, deadline: Instant) -> Result<String> {
     let worker_count = std::thread::available_parallelism()
         .context("Could not determine available CPU parallelism")?
         .get();
@@ -175,6 +201,138 @@ async fn find_nonce(challenge: &str, zeros: usize, deadline: Instant) -> Result<
     }
 
     bail!("Search deadline expired")
+}
+
+fn has_amd_gpu() -> Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        let drm_devices = match fs::read_dir("/sys/class/drm") {
+            Ok(devices) => devices,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(error).context("Could not inspect Linux DRM devices for an AMD GPU");
+            }
+        };
+        for entry in drm_devices {
+            let entry = entry.context("Could not read a Linux DRM device entry")?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name
+                .strip_prefix("card")
+                .is_some_and(|suffix| suffix.parse::<u32>().is_ok())
+            {
+                continue;
+            }
+
+            match fs::read_to_string(entry.path().join("device/vendor")) {
+                Ok(vendor) if vendor.trim().eq_ignore_ascii_case("0x1002") => return Ok(true),
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).context("Could not read a DRM device vendor identifier");
+                }
+            }
+        }
+        return Ok(false);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    Ok(false)
+}
+
+fn rocm_is_installed() -> bool {
+    let rocm_path = env::var_os("ROCM_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/opt/rocm"));
+    let hipcc = rocm_path.join("bin/hipcc");
+    if hipcc.is_file() {
+        return Command::new(hipcc)
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+    }
+
+    env::var_os("PATH").is_some_and(|paths| {
+        env::split_paths(&paths).any(|path| {
+            let candidate = path.join("hipcc");
+            candidate.is_file()
+                && Command::new(candidate)
+                    .arg("--version")
+                    .output()
+                    .is_ok_and(|output| output.status.success())
+        })
+    })
+}
+
+#[cfg(feature = "hip")]
+async fn find_nonce_hip(challenge: &str, zeros: usize, deadline: Instant) -> Result<String> {
+    if challenge.len() > 235 {
+        return find_nonce_cpu(challenge, zeros, deadline)
+            .await
+            .context("Challenge is too long for the HIP kernel; CPU search failed");
+    }
+
+    let device_count = hip_rs::get_device_count()
+        .map_err(|error| anyhow!("Could not query HIP devices: {error:?}"))?;
+    if device_count <= 0 {
+        bail!("ROCm is installed, but HIP reports no available GPU devices");
+    }
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        bail!("Search deadline expired");
+    }
+    let timeout_ms = u64::try_from(remaining.as_millis())
+        .context("Remaining challenge time exceeds the HIP timeout range")?
+        .max(1);
+    let challenge = challenge.as_bytes().to_vec();
+    let result = tokio::task::spawn_blocking(move || {
+        s3_hip_find_nonce(&challenge, zeros as u32, timeout_ms)
+    })
+    .await
+    .context("HIP nonce search worker panicked")??;
+
+    match result {
+        HipSearchResult::Found(nonce) => Ok(nonce.to_string()),
+        HipSearchResult::TimedOut => bail!("Search deadline expired"),
+    }
+}
+
+#[cfg(feature = "hip")]
+enum HipSearchResult {
+    Found(u64),
+    TimedOut,
+}
+
+#[cfg(feature = "hip")]
+fn s3_hip_find_nonce(challenge: &[u8], zeros: u32, timeout_ms: u64) -> Result<HipSearchResult> {
+    unsafe extern "C" {
+        fn s3_hip_find_nonce(
+            challenge: *const u8,
+            challenge_length: usize,
+            zeros: u32,
+            timeout_ms: u64,
+            result: *mut u64,
+        ) -> i32;
+    }
+
+    let mut nonce = 0_u64;
+    let status = unsafe {
+        s3_hip_find_nonce(
+            challenge.as_ptr(),
+            challenge.len(),
+            zeros,
+            timeout_ms,
+            &mut nonce,
+        )
+    };
+    match status {
+        0 => Ok(HipSearchResult::Found(nonce)),
+        1 => Ok(HipSearchResult::TimedOut),
+        -2 => bail!("HIP nonce search exhausted its supported range"),
+        -3 => bail!("ROCm is installed, but HIP reports no available GPU devices"),
+        code => Err(anyhow!("HIP nonce search failed with error code {code}")),
+    }
 }
 
 fn has_leading_zeroes(digest: &[u8], zeros: usize) -> bool {
