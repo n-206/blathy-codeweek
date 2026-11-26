@@ -4,7 +4,6 @@ use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{env, thread};
-//use std::io::{self, Write}; // for terminal clearing
 use tokio::sync::{OnceCell, oneshot};
 
 #[path = "Arena/mod.rs"]
@@ -55,10 +54,6 @@ async fn main() -> Result<()> {
         ("Exit", MenuOption::Exit),
     ];
     let labels: Vec<&str> = options.iter().map(|(label, _)| *label).collect();
-    // print!("\x1B[2J\x1B[H"); // Clearing terminal
-    // io::stdout()
-    //     .flush()
-    //     .context("Failed to clear the terminal before showing the menu")?;
     let Some(selection) = Select::new()
         .with_prompt("Choose a challenge")
         .items(&labels)
