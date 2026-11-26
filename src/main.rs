@@ -4,7 +4,6 @@ use futures::{FutureExt, future::BoxFuture};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{env, thread};
-//use std::io::{self, Write}; // for terminal clearing
 use tokio::sync::{OnceCell, oneshot};
 
 #[path = "Arena/mod.rs"]
@@ -55,10 +54,6 @@ async fn main() -> Result<()> {
         ("Exit", MenuOption::Exit),
     ];
     let labels: Vec<&str> = options.iter().map(|(label, _)| *label).collect();
-    // print!("\x1B[2J\x1B[H"); // Clearing terminal
-    // io::stdout()
-    //     .flush()
-    //     .context("Failed to clear the terminal before showing the menu")?;
     let Some(selection) = Select::new()
         .with_prompt("Choose a challenge")
         .items(&labels)
@@ -104,7 +99,7 @@ async fn main() -> Result<()> {
         MenuOption::SideMissionS2 => kuldetesek::s2::solve(&client).await?,
         MenuOption::SideMissionS3 => kuldetesek::s3::solve(&client).await?,
         MenuOption::SideMissionS4 => kuldetesek::s4::solve(&client).await?,
-        MenuOption::SideMissionS5 => {},
+        MenuOption::SideMissionS5 => kuldetesek::s5::solve(&client).await?,
         MenuOption::ArenaA1 => arena::a1::solve(&client).await?,
         MenuOption::ArenaA2 => arena::a2::solve(&client).await?,
         MenuOption::Exit => {}
